@@ -48,3 +48,19 @@ class Transmitter(object):
         send_bytes += flit_bin
         self.socket_inst.sendall(send_bytes)
         return 1
+    
+    def send_flit_bin_without_file(self, flit_bin:bytes | bytearray,data_type, directions=0):
+        """
+        发送flit
+        """
+        length = len(flit_bin) >> 2
+        if length > 2**26:
+            print("===<2>=== flit size is larger than 0.25GB")
+            print("===<2>=== send flit length failed")
+            return 0
+        send_bytes = bytearray()
+        send_bytes += struct.pack("I", length)
+        send_bytes += struct.pack("I", data_type)
+        send_bytes += flit_bin
+        self.socket_inst.sendall(send_bytes)
+        return 1
