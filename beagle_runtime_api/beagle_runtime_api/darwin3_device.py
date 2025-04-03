@@ -4,7 +4,7 @@ import logging,os,json,glob,re,struct,time
 from io import StringIO,BytesIO
 from pathlib import Path
 
-from gen_flit import FLIT_BINARY_LENGTH,FLIT_TEXT_LENGTH,gen_flit,gen_flit_east,gen_flit_parallel,gen_flit_parallel_east,gen_flit_quick
+from gen_flit import FLIT_BINARY_LENGTH,FLIT_TEXT_LENGTH,gen_flit,gen_flit_east,gen_flit_parallel,gen_flit_parallel_east
 from .tcp_transmitter import Transmitter
 from .parser.result_base import ResultBase
 from .parser.parse_flit import parse_flit
@@ -14,7 +14,10 @@ class darwin3_device(object):
     """
     用于和Darwin3开发板进行通信的类
     """
-
+    CHIP_RESET = 10
+    SET_FREQUENCY = 11
+    NORMAL_FLIT = 0x8000
+    
     def __init__(
         self, protocol="TCP", ip=['172.31.111.35'], port=[6000, 6001], step_size=100000, app_path="../", log_debug=False, spk_print=False,
     ):
@@ -454,261 +457,6 @@ class darwin3_device(object):
                     )
         load_f.close()
 
-    # 暂时不用
-    def __gen_flit_by_fn_quick__(self, fn, fin, direct=0, tc="", **config_list):
-        """
-        这个函数gen_flit_by_fn负责根据输入文件（通常是.dwnc文件）生成FLIT数据包，
-        并将这些数据包写入到文本和二进制文件中。
-        FLIT数据包是一种用于神经网络中数据传输的格式，
-        它包含了操作类型、目标地址、数据值和其他控制信息。
-        函数首先检查输入文件是否存在，如果不存在则直接返回。
-        然后，它打开文件并读取所有行，遍历每一行来处理不同的操作。
-        对于读操作，它可能需要从其他文件中读取数据并生成对应的FLIT数据包。
-        对于写操作，它需要将数据写入FLIT数据包中。
-        最后，它使用gen_flit函数生成FLIT数据包，并将这些数据包写入到文本和二进制文件中。
-        这个函数通过递归调用自己来处理包含的文件，
-        这允许它处理复杂的.dwnc文件，这些文件可能包含对其他文件的引用。
-        """
-        # print("===========================")
-        # print("into gen_flit_by_fn")
-        # print("file: " + fn)
-        # print("config list before:")
-        # print(config_list)
-        tc = self.config_path
-        while config_list.get("config_list") != None:
-            config_list = config_list["config_list"]
-        fbin = b''
-        #########################拆
-        for items in fn:
-            item = items.split()
-            if len(item) < 2:
-                continue
-            if "#" in item[0]:
-                continue
-            if item[1] == "read" and len(item) >= 6:
-                tmp = item
-                addr = eval(eval(item[4]))
-                while isinstance(item[5], str):
-                    item[5] = eval(item[5])
-                for i in range(int(item[5])):
-                    tmp[4] = '"%s"' % hex(addr + i)
-                    fbin += gen_flit_quick(
-                        tmp,
-                        fin,
-                        direct,
-                        x_from=-1,
-                        y_from=-1,
-                        config_list=config_list,
-                    )
-            elif (
-                item[1] == "write"
-                or items[1] == "write_ram"
-                or item[1] == "read_ack"
-                or item[1] == "write_risc"
-                or item[1] == "read_risc_ack"
-            ) and len(item) == 5:
-                if item[1] == "write_ram":
-                    item[1] = "write"
-                tmp = item
-                tmp.append("")
-                if os.path.exists(tc + item[4]):
-                    with open(tc + item[4], "rb") as write_f:
-                        tot = int.from_bytes(
-                            write_f.read(4), byteorder="little", signed=False
-                        )
-                        for segment in range(tot):
-                            area_id = int(write_f.read(1)[0])
-                            t = area_id & 0xF
-                            config_word_equal = (t & 0x80) != 0
-                            addr = int.from_bytes(
-                                write_f.read(4), byteorder="little", signed=False
-                            )
-                            length = int.from_bytes(
-                                write_f.read(4), byteorder="little", signed=False
-                            )
-                            bo = "little"
-                            bs = 4
-                            di = 1
-                            # Dedr
-                            if t == 0x01:
-                                addr += 0x10000
-                                bs = 6
-                            # Wgtsum
-                            elif t == 0x02:
-                                addr += 0x4000
-                                bs = 2
-                            # Inference State
-                            elif t == 0x03:
-                                addr += 0x10000
-                                bs = 6
-                                di = -1
-                            # Voltage
-                            elif t == 0x04:
-                                addr += 0x2000
-                                bs = 2
-                            # Axon
-                            elif t == 0x05:
-                                addr += 0x8000
-                                bs = 4
-                            # Learn State
-                            elif t == 0x06:
-                                addr += 0x10000
-                                bs = 6
-                                di = -1
-                            # Inst
-                            elif t == 0x07:
-                                addr += 0x1000
-                                bs = 2
-                            # Reg
-                            elif t == 0x08:
-                                addr += 0x800
-                                bs = 2
-                            size = length if config_word_equal else int(length / bs)
-                            x, y = int(item[2]), int(item[3])
-                            address = np.arange(addr, addr + size * di, di)
-                            if config_word_equal:
-                                value = struct.unpack_from(
-                                    "<Q", write_f.read(bs) + b"\x00" * (8 - bs)
-                                )[0]
-                                text_buffer = bytes(FLIT_TEXT_LENGTH)
-                                binary_buffer = bytes(
-                                    FLIT_BINARY_LENGTH
-                                )
-                                gen_flit_parallel(
-                                    x,
-                                    y,
-                                    address,
-                                    value,
-                                    text_buffer,
-                                    0,
-                                    binary_buffer,
-                                    0,
-                                    config_list=config_list,
-                                )
-                                text_buffer = text_buffer * size
-                                binary_buffer = binary_buffer * size
-                            else:
-                                buffer = write_f.read(length)
-                                index_byte = np.arange(0, length, bs)
-                                text_buffer = bytearray(
-                                    size * FLIT_TEXT_LENGTH
-                                )
-                                text_offset = np.arange(
-                                    0,
-                                    size * FLIT_TEXT_LENGTH,
-                                    FLIT_TEXT_LENGTH,
-                                )
-                                binary_buffer = bytearray(
-                                    size * FLIT_BINARY_LENGTH
-                                )
-                                binary_offset = np.arange(
-                                    0,
-                                    size * FLIT_BINARY_LENGTH,
-                                    FLIT_BINARY_LENGTH,
-                                )
-
-                                def convert(
-                                    x,
-                                    y,
-                                    address,
-                                    index_byte,
-                                    text_offset,
-                                    binary_offset,
-                                ):
-                                    buffer_value = buffer[
-                                        index_byte : index_byte + bs
-                                    ] + b"\x00" * (8 - bs)
-                                    value = struct.unpack("<Q", buffer_value)[0]
-                                    gen_flit_parallel(
-                                        x,
-                                        y,
-                                        address,
-                                        value,
-                                        text_buffer,
-                                        text_offset,
-                                        binary_buffer,
-                                        binary_offset,
-                                        config_list=config_list,
-                                    )
-
-                                np.frompyfunc(convert, 6, 0)(
-                                    x,
-                                    y,
-                                    address,
-                                    index_byte,
-                                    text_offset,
-                                    binary_offset,
-                                )
-                            # fin.write(text_buffer)
-                            # fbin.write(binary_buffer)
-                            fin.append(text_buffer)
-                            fbin += binary_buffer                        
-            elif (
-                item[1] == "write"
-                or item[1] == "write_ram"
-                or item[1] == "read_ack"
-                or item[1] == "write_risc"
-                or item[1] == "read_risc_ack"
-            ) and os.path.exists(tc + item[5]):
-                if item[1] == "write_ram":
-                    item[1] = "write"
-                tmp = item
-                x, y = int(item[2]), int(item[3])
-                addr = item[4]
-                while isinstance(addr, str):
-                    addr = eval(addr)
-                with open(tc + item[5], "r") as write_f:
-                    wlines = write_f.readlines()
-                    wlength = len(wlines)
-                    address = np.arange(addr, addr + wlength)
-                    text_buffer = bytearray(
-                        wlength * FLIT_TEXT_LENGTH
-                    )
-                    text_offset = np.arange(
-                        0,
-                        wlength * FLIT_TEXT_LENGTH,
-                        FLIT_TEXT_LENGTH,
-                    )
-                    binary_buffer = bytearray(
-                        wlength * FLIT_BINARY_LENGTH
-                    )
-                    binary_offset = np.arange(
-                        0,
-                        wlength * FLIT_BINARY_LENGTH,
-                        FLIT_BINARY_LENGTH,
-                    )
-
-                    def convert(x, y, address, line, text_offset, binary_offset):
-                        return gen_flit_parallel(
-                            x,
-                            y,
-                            address,
-                            int(line, 16),
-                            text_buffer,
-                            text_offset,
-                            binary_buffer,
-                            binary_offset,
-                            config_list=config_list,
-                        )
-
-                    np.frompyfunc(convert, 6, 0)(
-                        x, y, address, wlines, text_offset, binary_offset
-                    )
-                    # fin.write(text_buffer)
-                    # fbin.write(binary_buffer)
-                    fin.append(text_buffer)
-                    fbin += binary_buffer
-            else:
-                fbin += gen_flit_quick(
-                    item,
-                    fin,
-                    direct,
-                    x_from=-1,
-                    y_from=-1,
-                    config_list=config_list,
-                )
-        return fbin
-
     def __gen_flit_by_fn_east__(self, fn, fin, fbin, direct=0, tc="", **config_list):
         """
         这个函数gen_flit_by_fn负责根据输入文件（通常是.dwnc文件）生成FLIT数据包，
@@ -1021,39 +769,6 @@ class darwin3_device(object):
         if self.log_debug:
             logging.debug("======%s flit_gen elapsed : %.4f ms" % (output_file,(end_time - start_time)*1000))
 
-    # 暂时不用
-    def __flit_gen_quick__(self, type="", input_dwnc=[], output_file="", update=True):
-        config_list = {
-            "last_vc": 1,
-            "tick": 0,
-            "start_tick": -1,
-            "stop_tick": -1,
-            "clear_tick": -1,
-            "pkg_num": 0,
-        }
-        if self.log_debug:
-            logging.info("generating flit bin" )
-        start_time = time.time()
-        file_path = ""
-        if type == "deploy":
-            file_path = self.deploy_path
-        elif type == "input":
-            file_path = self.input_path
-        elif type == "debug":
-            file_path = self.debug_path
-        else:
-            print("type not supported!")
-            return
-        fin = []
-        config_list["tick"] = 0
-        fin_bin = self.__gen_flit_by_fn_quick__(
-            input_dwnc, fin, file_path, config_list=config_list
-        )
-        end_time = time.time()
-        if self.log_debug:
-            logging.debug("====== flit_gen elapsed : %.4f ms" % ((end_time - start_time)*1000))
-        return fin_bin
-
     def __flit_gen_east__(self, type="", input_file="", output_file="", update=True):
         config_list = {
             "last_vc": 1,
@@ -1175,231 +890,7 @@ class darwin3_device(object):
                 output_file=deploy_flitin_file+"_east"
             )
         return
-
-    # 暂时不用
-    def __gen_run_input_dwnc_quick__(
-        self, spike_neurons: list, spike_file="spikes.dwnc"
-    ):
-        """
-        input_neuron.json && spike_neurons (list) => spikes.dwnc
-        根据输入的每个时间步的脉冲信息, 结合每个神经元的配置 json 文件, 生成 dwnc 文件配置
-        Args:
-            spike_neurons (list): 输入的神经元脉冲序列
-            spike_file (str): 生成的脉冲输入 dwnc 文件配置
-        Returns:
-            None
-        """
-        steps = len(spike_neurons)
-        f = []
-        f.append('0 cmd "0xc0000001"')
-        for i in range(0, len(spike_neurons)):
-            time_step = i + 1
-            cur_spike_neuron_list = spike_neurons[i]
-            for spike_neuron in cur_spike_neuron_list:
-                neuron_info = self.input_neuron[str(spike_neuron)]
-                if len(neuron_info) > 0:
-                    neuron_type = neuron_info[0]
-                    targets_list = neuron_info[-1]
-                    if neuron_type == 0:
-                        neu_idx = hex(neuron_info[1])   # 返回'0x'开头的字符串
-                    elif neuron_type == 1:
-                        neu_idx = "0x0"
-                    for target in targets_list:
-                        x = target[0]
-                        y = target[1]
-                        derd_id = hex(target[2])
-                        cur_line = str(time_step) + " spike " + str(x) + " " + str(y) + " \"" + derd_id + "\""+" \""+ neu_idx +"\""
-                        f.append(cur_line)
-        f.append(str(steps) + ' cmd "0xc0000000"')
-        # with open(self.input_path+'run_input_quick.txt','w+') as ff:
-            # for i in f:
-                # ff.write(i+'\n')
-        return f
     
-    def __gen_spike_file__(
-        self, spike_neurons: list, spike_file="spikes.dwnc"
-    ):
-        """
-        input_neuron.json && spike_neurons (list) => spikes.dwnc
-        根据输入的每个时间步的脉冲信息, 结合每个神经元的配置 json 文件, 生成 dwnc 文件配置
-        Args:
-            spike_neurons (list): 输入的神经元脉冲序列
-            spike_file (str): 生成的脉冲输入 dwnc 文件配置
-        Returns:
-            None
-        """
-        with open(self.config_path + spike_file, "w+") as f:
-            for i in range(0, len(spike_neurons)):
-                time_step = i + 1
-                cur_spike_neuron_list = spike_neurons[i]
-                for spike_neuron in cur_spike_neuron_list:
-                    neuron_info = self.input_neuron[str(spike_neuron)]
-                    if len(neuron_info) > 0:
-                        neuron_type = neuron_info[0]
-                        targets_list = neuron_info[-1]
-                        if neuron_type == 0:
-                            neu_idx = hex(neuron_info[1])   # 返回'0x'开头的字符串
-                        elif neuron_type == 1:
-                            neu_idx = "0x0"
-                        for target in targets_list:
-                            x = target[0]
-                            y = target[1]
-                            derd_id = hex(target[2])
-                            cur_line = f"{time_step} spike {x} {y} {derd_id} {neu_idx}\n"
-                            f.write(cur_line)
-        return
-
-    def _dict_gen_run_flit_(self, spike_neurons:list):
-        """
-        input_neuron.json && spike_neurons (list) => spikes.dwnc
-        根据输入的每个时间步的脉冲信息, 结合每个神经元的配置 json 文件, 生成 dwnc 文件配置
-        Args:
-            spike_neurons (list): 输入的神经元脉冲序列
-            spike_file (str): 生成的脉冲输入 dwnc 文件配置
-        Returns:
-            None
-        """
-        fin = open(self.input_path +"run_flitin.txt", "wb")
-        fbin = open(self.input_path +"run_flitin.bin", "wb")
-        tik = 0
-        tik_pre = 0
-        cmd = 0xc0000001
-        pclass = "cmd"
-        if pclass == "cmd":
-            l = cmd
-            ss_l = b"%08x\n" % l
-            fin.write(ss_l)
-            fbin.write(struct.pack("I", l))
-        for i in range(0, len(spike_neurons)):
-            tik = i+1
-            if tik != tik_pre:
-                cmd = 0b011000
-                arg = (tik - tik_pre - 1) & 0xFFFFFF
-                cmd_f = 0x3
-                l = (cmd_f << 30) + (cmd << 24) + arg
-                ss_l = b"%08x\n" % l
-                fin.write(ss_l)
-                fbin.write(struct.pack("I", l))   
-            tik_pre = tik
-            cur_spike_neuron_list = spike_neurons[i]
-            for spike_neuron in cur_spike_neuron_list:
-                neuron_info = self.input_neuron[str(spike_neuron)]
-                if len(neuron_info) > 0:
-                    neuron_type = neuron_info[0]
-                    targets_list = neuron_info[-1]
-                    if neuron_type == 0:
-                        neu_idx = int(neuron_info[1])   # 返回'0x'开头的字符串
-                    elif neuron_type == 1:
-                        neu_idx = 0
-                    for target in targets_list:
-                        x = int(target[0])
-                        y = int(target[1])
-                        dedr_id = int(target[2])
-                        pclass = "spike"
-                        x_from = -1
-                        y_from = -1
-                        x_src = x_from - x
-                        if x_src > 0:
-                            x_sig = 1
-                        else:
-                            x_src = -x_src
-                            x_sig = 0
-                        if y_from != -1 and x_from != -1:
-                            if x_src != 0:
-                                if x_sig == 1:
-                                    x_dff = -1 - x
-                                else:
-                                    x_dff = 24 - x
-                            else:
-                                x_dff = 0
-                        elif x_src >= 1:
-                            x_dff = x_src - 1
-                        else:
-                            x_dff = 0
-                        if x_src == 16:
-                            x_src = 15
-                        if y_from == -1:
-                            if y < 0:
-                                y_sig = 1
-                                y_dff = -y - 1
-                                y_src = -y
-                            elif y < 24:
-                                y_sig = 0
-                                y_dff = 0
-                                y_src = 0
-                            else:
-                                y_sig = 0
-                                y_dff = y - 24
-                                y_src = y - 23
-                        else:
-                            y_sig = 0
-                            y_src = y_from - y
-                            if y_src > 0:
-                                y_sig = 1
-                                y_dff = y_from - y
-                            elif y_src < 0:
-                                y_src = -y_src
-                                y_dff = y - y_from
-                            else:
-                                y_dff = 0
-                            if y_src == 16:
-                                y_src = 15
-
-                        if x_dff > 0:
-                            if x_sig == 1:
-                                port = "01000"
-                            else:
-                                port = "00010"
-                        else:
-                            if y_dff == 0:
-                                port = "00001"
-                            elif y_sig == 1:
-                                port = "00100"
-                            else:
-                                port = "10000"
-                        route_id = y
-                        if y_from != -1:
-                            route_id = y_from
-                        else:
-                            if y < 0:
-                                route_id = 0
-                            elif y > 23:
-                                route_id = 23
-                        port = int(port,2)
-                        port = darwin3_device.onehot2bin(port)
-
-                        if pclass == "spike":
-                            dedr_id = dedr_id
-                            neu_idx = neu_idx
-                            l = (
-                                (0x2 << 30)
-                                + (route_id << 25)
-                                + (0x0 << 22)
-                                + (port << 19)
-                                + (x_sig << 18)
-                                + (x_dff << 14)
-                                + (y_sig << 13)
-                                + (y_dff << 9)
-                                + (x_src << 5)
-                                + (y_src << 1)
-                            )
-                            ss_l = b"%08x\n" % l
-                            fin.write(ss_l)
-                            fbin.write(struct.pack("I", l))
-                            l = (0x1 << 30) + (dedr_id << 15) + (neu_idx << 3)
-                            ss_l = b"%08x\n" % l
-                            fin.write(ss_l)
-                            fbin.write(struct.pack("I", l))              
-        cmd = 0xc0000000
-        pclass = "cmd"
-        if pclass == "cmd":
-            l = cmd
-            ss_l = b"%08x\n" % l
-            fin.write(ss_l)
-            fbin.write(struct.pack("I", l))
-        return
-
-
     def __gen_run_input_dwnc__(
         self,
         spike_neurons: list,
@@ -1440,24 +931,6 @@ class darwin3_device(object):
             output_file=run_flitin_file,
         )
         return
-
-    # 暂时不用
-    def __gen_run_flitin_quick__(
-        self, run_input_dwnc, run_flitin_file="run_flitin"
-    ):
-        """
-        run_input.dwnc => run_flitin.txt && run_flitin.bin
-        Args:
-            run_input_dwnc_file (str): 输入的运行 dwnc 文件
-            run_flitin_file (str): 生成的运行 flit 文件
-        Returns:
-            None
-        """
-        rslt = self.__flit_gen_quick__(
-            type="input",
-            input_dwnc=run_input_dwnc,
-        )
-        return rslt
 
     def __transmit_flit__(self, port, data_type, freq=333, fbin="", recv=False, recv_run_flit_file="recv_run_flit", debug=False):
         """
@@ -1507,92 +980,6 @@ class darwin3_device(object):
                 logging.debug('====== tcp recv elapsed : %.4f ms' % ((end_time - start_time)*1000))
         trans.close()
         return
-    
-    # 暂时不用
-    def __transmit_flit_quick__(self, port, data_type, freq=333, fbin=b'', recv=False, recv_run_flit_file="recv_run_flit", debug=False):
-        """
-        发包到darwin3, recv=True时接收darwin3返回来的包
-        Args:
-            port (list(int)): TCP 连接端口列表
-            data_type (int): 发送包的格式
-            freq (int): 设置的时钟频率 (仅当 data_type==SET_FREQUENCY 时有效)
-            fbin (str): 发送的包内容 (仅当 data_type==NORMAL_FLIT 时有效)
-            recv (bool): 是否接受 Darwin3 的返回包
-            recv_run_flit_file (str): 保存返回包的名称
-            debug (bool): 调试标记
-        Returns:
-            None
-        """
-        trans = Transmitter()
-        ip_address = (self.ip, port)
-        trans.connect_lwip(ip_address)
-        if self.log_debug:
-            logging.info("tcp connect succeed")
-        start_time = time.time()
-        if data_type == darwin3_device.CHIP_RESET:
-            send_bytes = bytearray()
-            send_bytes += struct.pack('I', 0x0000)
-            send_bytes += struct.pack('I', data_type)
-            trans.socket_inst.sendall(send_bytes)
-            if self.log_debug:
-                logging.info("reset packet sent")
-        elif data_type == darwin3_device.SET_FREQUENCY:
-            send_bytes = bytearray()
-            send_bytes += struct.pack('I', freq)
-            send_bytes += struct.pack('I', data_type)
-            trans.socket_inst.sendall(send_bytes)
-            if self.log_debug:
-                logging.info("set frequency packet sent")
-        else:
-            trans.send_flit_bin_quick(fbin, data_type)
-            if self.log_debug:
-                logging.info("flit data packet sent")
-        end_time = time.time()
-        if self.log_debug:
-            logging.debug('====== tcp sent elapsed : %.4f ms' % ((end_time - start_time)*1000))
-        rslt = []
-        if recv:
-            rslt = self.__recv_flit_quick__(trans,recv_run_flit_file,debug)
-            end_time = time.time()
-            if self.log_debug:
-                logging.debug('====== tcp recv elapsed : %.4f ms' % ((end_time - start_time)*1000))
-        trans.close()
-        return rslt
-
-    # 暂时不用
-    def __recv_flit_quick__(self, trans, recv_run_flit_file="recv_run_flit", debug=False):
-        """
-        接收从darwin3来的包
-        Args:
-            trans (Transmitter): Transmitter
-            recv_run_flit_file (str): 保存返回包的名称
-            debug (bool): 调试标记
-        Returns:
-            None
-        """
-        fout = []
-        foutbin = b''
-        hl = b''
-        index = 0
-        tot = 0
-        while True:
-            request = trans.socket_inst.recv(10240)
-            if len(request) <= 0:
-                break
-            # foutbin.write(request)
-            foutbin += request
-            for i in range(len(request)):
-                b = b"%02x" % request[i]
-                hl = b + hl
-                index = index + 1
-                if (index == 4):
-                    # fout.write (hl + b"\n")
-                    fout.append(hl.decode('utf-8'))
-                    # print(hl)
-                    hl = b""
-                    index = 0
-                    tot = tot + 1
-        return fout
 
     def __recv_flit__(self, trans, recv_run_flit_file="recv_run_flit", debug=False):
         """
@@ -1765,131 +1152,6 @@ class darwin3_device(object):
             logging.debug('====== parser recv flit:%s.txt elapsed : %.4f ms' % (recv_run_flit_file,(end_time - start_time)*1000))
         return
 
-    # 暂时不用
-    def __run_parser_quick__(self, recv_run_flit, result=[[],], debug=False, pop_name=''):
-        """
-        解析 Darwin3 返回的包
-        Args:
-            recv_run_flit_file (str): 返回包的名称
-            result (list(list)): 解析结果
-            debug (bool): 调试标记
-            pop_name (str): 输出的文件名
-        Returns:
-            None
-        """
-        start_time = time.time()
-        lines = recv_run_flit
-        index = 0
-        is_write = 0
-        is_spike = 0
-        is_reward = 0
-        is_flow = 0
-        is_dedr = 0
-        t = 0
-        # if debug:
-            # fanalyse = open(file_path+recv_run_flit_file+'_'+pop_name+'_analyse.txt','w')
-        for items in lines:
-            _flit_type = (int(items[0],16)>>2)&0x3
-            if _flit_type == 3:  #flit_type=3 
-                cmd = int(items[0:2],16)&0x3f    #[31:26]
-                if cmd == 0b011000:     # d8000000
-                    arg = int(items[2:8],16)
-                    t+=arg+1
-            elif _flit_type == 2 :    #flit_type=2 包头
-                index = 0
-                _pak_class = (int(items[1:3],16)>>2)
-                is_write = _pak_class & 0x7 == 1    #[24:22]
-                is_spike = _pak_class & 0x7 in (0,4,5,6)
-                is_reward= _pak_class & 0x7 in (5,6)
-                is_flow  = _pak_class & 0x7 == 7
-                _dst = int(items[3:5],16)
-                dst_x = (_dst>>2) & 0xf    #[17:14]
-                if (_dst>>6) & 0x1 == 1:     #[18]
-                    dst_x = -dst_x
-                y = (int(items[0:2],16)>>1)&0x1f     #[29:25]
-                x = ((int(items[5:7],16)>>1)&0xf) + dst_x - 1    #[8:5]
-            elif (is_write == 1) :
-                if _flit_type == 1 :
-                    value = (value<<24) + ((int(items[0:8],16)>>3)&0x7ffffff)
-                    addr_eff = addr & 0x1ffff
-                    addr_relay = (addr >> 18) & 0x3f
-                    if self.log_debug:
-                        if (is_dedr):
-                            if self.printc:
-                                logging.info("[dedr] tik=%d, x=%d, y=%d, relay_link=0x%02x, addr=0x%05x, value=0x%012x " % (t,x,y,addr_relay,addr_eff,value))
-                        else:
-                            if addr_eff >= 0x8000:
-                                c = "axon"
-                            elif addr_eff >= 0x4000:
-                                c = "wgtsum"
-                            elif addr_eff >= 0x2000:
-                                c = "vt"
-                            elif addr_eff >= 0x1000:
-                                c = "inst"
-                            elif addr_eff >= 0x800:
-                                c = "reg"
-                            else:
-                                c = "conf"
-                            v = value & 0xffff
-                            if v >= 0x8000 and addr_eff >= 0x800 and addr_eff < 0x8000:
-                                v = v - 0x10000
-                            if self.printc:
-                                logging.info("[%s] tik=%d, x=%d, y=%d, relay_link=0x%02x, addr=0x%05x, value=0x%08x (%d)" % (c,t,x,y,addr_relay,addr_eff,value,v))
-                            addr_eff = f"{addr_eff:05x}"
-                            value = f"{value:08x}"
-                            # if debug:
-                                # fanalyse.write('\"0x'+addr_eff+'\" \"0x'+value+'\"'+' '+str(v)+'\n')
-                    is_write = 0
-                elif _flit_type == 0 :
-                    if (index == 0):
-                        addr = (int(items[0:8],16)>>3)&0x7ffffff
-                        index = index + 1
-                        if ((addr & 0x1ffff) >= 0x10000):
-                            is_dedr = 1
-                    else :
-                        value = (int(items[0:8],16)>>3)&0x7ffffff
-            elif (is_spike == 1) :
-                if _flit_type == 1 :      #flit_type=1 包尾
-                    neu_idx = (int(items[4:8],16) >> 3) & 0xfff  #[29:15]
-                    dedr_id = (int(items[0:5],16) >> 3) & 0x7fff  #[14:3]
-
-                    index = f"{x}, {y}, {dedr_id}"
-                    for output_name,output_neuron_info in self.output_neuron_info_jsons:
-                        if output_neuron_info.get(index) is not None:
-                            result[t-1].append((output_name,output_neuron_info[index]))
-                    if self.log_debug:
-                        if is_reward:
-                            if self.printc:
-                                logging.info("[rwd] tik=%d, x=%d, y=%d, dedr_id=0x%04x, wgt=0x%02x" % (t,x,y,dedr_id,neu_idx))
-                        else:
-                            if self.printc:
-                                logging.info("[spk] tik=%d, x=%d, y=%d, dedr_id=0x%04x, neu_idx=0x%03x" % (t,x,y,dedr_id,neu_idx))
-                    is_spike = 0
-                    is_reward = 0
-            elif (is_flow == 1) :
-                if _flit_type == 1 :
-                    addr_relay = (addr >> 18) & 0x3f
-                    data = data + ((int(items[0:8],16)&0x3fffffff)<<24)
-                    data = (data << 17) + (addr & 0x1ffff)
-                    if self.log_debug:
-                        if self.printc:
-                            logging.info("[flow] tik=%d, x=%d, y=%d, relay_link=0x%02x, data=0x%018x" % (t,x,y,addr_relay,data))
-                    is_flow = 0
-                elif _flit_type == 0 :
-                    if (index == 0):
-                        addr = (int(items[9:16],16)>>3)&0x7ffffff
-                        index = index + 1
-                    else :
-                        data = (int(items[0:8],16)>>3)&0x7ffffff
-            # if debug:
-                # fanalyse.close()
-        # flit_f.close()
-        end_time = time.time()
-        if self.log_debug:
-            logging.info('====== parser recv flit elapsed : %.4f ms' % ((end_time - start_time)*1000))
-        return
-
-
     def reset(self):
         """
         复位硬件接口相关逻辑和硬件系统(darwin3 芯片, DMA 等)
@@ -1933,58 +1195,6 @@ class darwin3_device(object):
             self.__transmit_flit__(port=self.port[1], data_type=self.NORMAL_FLIT, fbin=self.deploy_path+"deploy_flitin_east.bin")
         return
     
-    def run_darwin3_withfile(self, spike_neurons: list):
-        """
-        接收应用给的 spike_neurons 作为输入，运行 len(spike_neurons) 个时间步
-        此函数会产生中间文件进行过渡
-        Args:
-            spike_neurons (list): sequence, 本次应用输入给硬件的脉冲数据, 
-                                  序列长度与时间步数量一致，没有脉冲的时间步给空值
-        Returns:
-            result (list): 本次运行结束时硬件返回给应用的脉冲
-        """
-        result = [[] for _ in range(len(spike_neurons))]
-        # self.__gen_spike_file__(spike_neurons)
-        # self.__gen_run_input_dwnc__(spike_neurons)
-        # self.__gen_run_flitin__()
-        self._dict_gen_run_flit_(spike_neurons)
-        self.__transmit_flit__(port=self.port[0], data_type=self.NORMAL_FLIT, fbin=self.input_path+"run_flitin.bin", recv=True, recv_run_flit_file="recv_run_flit")
-        self.__run_parser__(result=result)
-        return result
-
-    def run_darwin3_withoutfile(self, spike_neurons: list):
-        """
-        接收应用给的 spike_neurons 作为输入，运行 len(spike_neurons) 个时间步
-        此函数会产生中间文件进行过渡
-        Args:
-            spike_neurons (list): sequence, 本次应用输入给硬件的脉冲数据, 
-                                  序列长度与时间步数量一致，没有脉冲的时间步给空值
-        Returns:
-            result (list): 本次运行结束时硬件返回给应用的脉冲
-        """
-        result = [[] for _ in range(len(spike_neurons))]
-        run_input_dwnc = self.__gen_run_input_dwnc_quick__(spike_neurons)
-        fbin_data = self.__gen_run_flitin_quick__(run_input_dwnc)
-        rslt = self.__transmit_flit_quick__(port=self.port[0], data_type=self.NORMAL_FLIT, fbin=fbin_data, recv=True, recv_run_flit_file="recv_run_flit")
-        self.__run_parser_quick__(result=result,recv_run_flit=rslt)
-        return result
-
-    def dump_config(self, x: int, y: int, config="all", cfg_o=""):
-        """
-        !!! Not yet implemented
-        根据核心坐标和类型查询并下载芯片上的配置信息到本地，用于与编译结果比对以便确认部署阶段的正确运行。
-        (NoC 不保证传输顺序，如果存在不一致需要进一步确认)
-        Args:
-            x (int): 核心的 x 坐标
-            y (int): 核心的 y 坐标
-            config (str): 包括"reg", "axon", "dendrite", "instruction" 或者 “all”
-            cfg_o: file: 接收后产生的 x-y-xx.txt 文件名称
-        Returns:
-            None
-        """
-        print("!!! Not yet implemented")
-        return
-
     def get_neuron_state(self, pop_name: str, state: list, offset=0):
         """
         从硬件获取神经元的状态，状态空间包括膜电位、权重和、推理参数、推理状态等，主要用于调试。
@@ -2062,20 +1272,6 @@ class darwin3_device(object):
         debug_from_east == False
         self.log_debug = False
 
-        return
-
-    def set_neuron_state(self, pop_name: str, state: list, value: list):
-        """
-        !!! Not yet implemented
-        设置硬件神经元的状态，包括膜电位、权重和、推理参数、推理状态等，主要用于调试。
-        Args:
-            pop_name (str): 编译阶段的 Population Name
-            state (list(str, list)): 包含一组或多组[神经元序号, [状态空间列表]]
-            value (list): 状态空间对应的所需要设置的内容
-        Returns:
-            None
-        """
-        print("!!! Not yet implemented")
         return
 
     def enable_neurons(self, dwnc_file="enable"):
@@ -2239,7 +1435,7 @@ class darwin3_device(object):
             self.__transmit_flit__(port=self.port[1], data_type=self.NORMAL_FLIT, fbin=self.deploy_path+dwnc_file+"_flitin_east.bin")
         return
     
-
+    # new part
     def _transmit_flit(self, port, data_type, flit_bin:bytearray, recv=False, recv_run_flit_file : Path=None) -> StringIO:
         """
         发包到darwin3, recv=True时接收darwin3返回来的包
@@ -2254,7 +1450,7 @@ class darwin3_device(object):
         Returns:
             None
         """
-        trans = TCP_Transmitter()
+        trans = Transmitter()
         trans.connect_lwip((self.ip, port))
         print("===<1>=== tcp connect succeed")
         start_time = time.time_ns()
