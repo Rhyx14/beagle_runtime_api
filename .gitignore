@@ -1,0 +1,11 @@
+*__pycache__/
+ann_mnist_bias/
+.vscode/
+test_czh/*
+apps/
+*.egg-info/
+build/
+dist/
+.DS_Store
+README.pdf
+test*
