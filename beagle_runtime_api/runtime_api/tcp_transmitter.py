@@ -1,7 +1,7 @@
-import socket
+import socket,struct
 class Transmitter(object):
     """
-    用于建立TCP连接的类，普通用户无需关注
+    用于建立TCP连接的类
     """
     def __init__(self):
         self.socket_inst = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
