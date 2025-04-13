@@ -4,7 +4,7 @@ import logging,os,json,glob,re,struct,time
 from io import StringIO,BytesIO
 from pathlib import Path
 
-from gen_flit import FLIT_BINARY_LENGTH,FLIT_TEXT_LENGTH,gen_flit,gen_flit_east,gen_flit_parallel,gen_flit_parallel_east
+from .gen_flit import FLIT_BINARY_LENGTH,FLIT_TEXT_LENGTH,gen_flit,gen_flit_east,gen_flit_parallel,gen_flit_parallel_east
 from .tcp_transmitter import Transmitter
 from .parser.result_base import ResultBase
 from .parser.parse_flit import parse_flit
@@ -890,29 +890,6 @@ class darwin3_device(object):
                 output_file=deploy_flitin_file+"_east"
             )
         return
-    
-    def __gen_run_input_dwnc__(
-        self,
-        spike_neurons: list,
-        spike_file="spikes.dwnc",
-        run_input_dwnc_file="run_input.dwnc",
-    ):
-        """
-        input_neuron.json && length of spike_neurons (list) => spikes.dwnc
-        跟据spikes.dwnc以及config文件中提到的神经元，生成对应的run_input.dwnc文件
-        Args:
-            spike_neurons (list): 输入的神经元脉冲序列 (仅用到其length, 可以优化)
-            spike_file (str): 脉冲输入 dwnc 文件配置
-            run_input_dwnc_file (str): 生成的运行 dwnc 文件
-        Returns:
-            None
-        """
-        steps = len(spike_neurons)
-        with open(self.input_path + run_input_dwnc_file, "w+") as f:
-            f.write('0 cmd 0xc0000001\n')
-            f.write(f'<< {spike_file}\n')
-            f.write(f'{steps} cmd 0xc0000000\n')
-        return
 
     def __gen_run_flitin__(
         self, run_input_dwnc_file="run_input.dwnc", run_flitin_file="run_flitin"
@@ -1452,8 +1429,8 @@ class darwin3_device(object):
         """
         trans = Transmitter()
         trans.connect_lwip((self.ip, port))
-        print("===<1>=== tcp connect succeed")
-        start_time = time.time_ns()
+        # print("===<1>=== tcp connect succeed")
+        # start_time = time.time_ns()
         match data_type:
             case darwin3_device.CHIP_RESET:
                 send_bytes = bytearray()
@@ -1467,9 +1444,9 @@ class darwin3_device(object):
                 print("===<2>=== set frequency succeed")
             case _ :
                 trans.send_flit_bin_without_file(flit_bin, data_type)
-                print("===<2>=== send succeed")
-        end_time = time.time_ns()
-        print('===<3>=== tcp sent elapsed : %.3f ms' % ((end_time - start_time)/1000000))
+                # print("===<2>=== send succeed")
+        # end_time = time.time_ns()
+        # print('===<3>=== tcp sent elapsed : %.3f ms' % ((end_time - start_time)/1000000))
 
         if recv:
             fout = StringIO()
@@ -1541,7 +1518,7 @@ class darwin3_device(object):
 
         return dwnc_list
 
-    def _gen_flit_by_dwnc(self, dwnc_list: list[str], direct=0):
+    def _gen_flit_by_dwnc_west(self, dwnc_list: list[str], direct=0):
         """
         这个函数gen_flit_by_fn负责根据输入文件（通常是.dwnc文件）生成FLIT数据包，
         并将这些数据包写入到文本和二进制文件中。
@@ -1594,7 +1571,7 @@ class darwin3_device(object):
                 item[5] = int(item[5],16)
                 for i in range(int(item[5])):
                     tmp[4] = "%s" % hex(addr + i)
-                    darwin3_device.__gen_flit__(
+                    gen_flit(
                         tmp,
                         fin_text,
                         fin_bin,
@@ -1673,11 +1650,11 @@ class darwin3_device(object):
                                 value = struct.unpack_from(
                                     "<Q", write_f.read(bs) + b"\x00" * (8 - bs)
                                 )[0]
-                                text_buffer = bytes(darwin3_device.FLIT_TEXT_LENGTH)
+                                text_buffer = bytes(FLIT_TEXT_LENGTH)
                                 binary_buffer = bytes(
-                                    darwin3_device.FLIT_BINARY_LENGTH
+                                    FLIT_BINARY_LENGTH
                                 )
-                                darwin3_device.__gen_flit_parallel__(
+                                gen_flit_parallel(
                                     x,
                                     y,
                                     address,
@@ -1694,20 +1671,20 @@ class darwin3_device(object):
                                 buffer = write_f.read(length)
                                 index_byte = np.arange(0, length, bs)
                                 text_buffer = bytearray(
-                                    size * darwin3_device.FLIT_TEXT_LENGTH
+                                    size * FLIT_TEXT_LENGTH
                                 )
                                 text_offset = np.arange(
                                     0,
-                                    size * darwin3_device.FLIT_TEXT_LENGTH,
-                                    darwin3_device.FLIT_TEXT_LENGTH,
+                                    size * FLIT_TEXT_LENGTH,
+                                    FLIT_TEXT_LENGTH,
                                 )
                                 binary_buffer = bytearray(
-                                    size * darwin3_device.FLIT_BINARY_LENGTH
+                                    size * FLIT_BINARY_LENGTH
                                 )
                                 binary_offset = np.arange(
                                     0,
-                                    size * darwin3_device.FLIT_BINARY_LENGTH,
-                                    darwin3_device.FLIT_BINARY_LENGTH,
+                                    size * FLIT_BINARY_LENGTH,
+                                    FLIT_BINARY_LENGTH,
                                 )
 
                                 def convert(
@@ -1722,7 +1699,7 @@ class darwin3_device(object):
                                         index_byte : index_byte + bs
                                     ] + b"\x00" * (8 - bs)
                                     value = struct.unpack("<Q", buffer_value)[0]
-                                    darwin3_device.__gen_flit_parallel__(
+                                    gen_flit_parallel(
                                         x,
                                         y,
                                         address,
@@ -1761,24 +1738,24 @@ class darwin3_device(object):
                     wlength = len(wlines)
                     address = np.arange(addr, addr + wlength)
                     text_buffer = bytearray(
-                        wlength * darwin3_device.FLIT_TEXT_LENGTH
+                        wlength * FLIT_TEXT_LENGTH
                     )
                     text_offset = np.arange(
                         0,
-                        wlength * darwin3_device.FLIT_TEXT_LENGTH,
-                        darwin3_device.FLIT_TEXT_LENGTH,
+                        wlength * FLIT_TEXT_LENGTH,
+                        FLIT_TEXT_LENGTH,
                     )
                     binary_buffer = bytearray(
-                        wlength * darwin3_device.FLIT_BINARY_LENGTH
+                        wlength * FLIT_BINARY_LENGTH
                     )
                     binary_offset = np.arange(
                         0,
-                        wlength * darwin3_device.FLIT_BINARY_LENGTH,
-                        darwin3_device.FLIT_BINARY_LENGTH,
+                        wlength * FLIT_BINARY_LENGTH,
+                        FLIT_BINARY_LENGTH,
                     )
 
                     def convert(x, y, address, line, text_offset, binary_offset):
-                        return darwin3_device.__gen_flit_parallel__(
+                        return gen_flit_parallel(
                             x,
                             y,
                             address,
@@ -1796,7 +1773,7 @@ class darwin3_device(object):
                     fin_text.write(text_buffer)
                     fin_bin.write(binary_buffer)
             else:
-                darwin3_device.__gen_flit__(
+                gen_flit(
                     item,
                     fin_text,
                     fin_bin,
@@ -1808,7 +1785,7 @@ class darwin3_device(object):
         return fin_text,fin_bin
 
     def _excute_dwnc_command_west(self,dwnc_list,saving_dir,saving_name,saving_input_flit=True,saving_recv=True,parser_log=True):
-        text_io_rslt,bin_io_rslt=self._gen_flit_by_dwnc(dwnc_list)
+        text_io_rslt,bin_io_rslt=self._gen_flit_by_dwnc_west(dwnc_list)
         if saving_input_flit:
             (saving_dir / (saving_name + '.txt')).write_bytes(text_io_rslt.getvalue())
             # (saving_dir / (saving_name + '.bin')).write_bytes(bin_io_rslt.getvalue())

@@ -290,5 +290,6 @@ test.get_neuron_state("pop_h_1", state)
 ## TODO
 - [ ] maze 应用测试
 - [ ] Pathlib化
+- [ ] dwnc对象化
 - [ ] clear_neuron_state 迁移
 - [ ] config 迁移
