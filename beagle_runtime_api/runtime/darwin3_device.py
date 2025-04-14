@@ -6,12 +6,15 @@ from pathlib import Path
 
 from .tcp_transmitter import Transmitter
 from .parser.result_base import ResultBase
-from .parser.parse_flit import parse_flit
+from .parser.parse_flit import parse_flit_bin
 from .parser.decoder import spikes
 
-from .flit.gen_flit_by_dwnc import gen_flit_by_dwnc_west
+from .flit.gen_flit_by_dwnc import gen_flit_by_dwnc_mem_west
 from .flit.flit_constant import FLIT_BINARY_LENGTH,FLIT_BINARY_LENGTH_VALUE,FLIT_BINARY_NUM_VALUE,FLIT_TEXT_LENGTH,FLIT_TEXT_LENGTH_BYTE,FLIT_TEXT_NUM_BYTE
 from .flit.gen_flit import gen_flit,gen_flit_east,gen_flit_parallel,gen_flit_parallel_east
+
+from .dwnc import DWNC
+from x_secretary.utils.time import measure_time
 
 class darwin3_device(object):
     """
@@ -1132,32 +1135,6 @@ class darwin3_device(object):
             logging.debug('====== parser recv flit:%s.txt elapsed : %.4f ms' % (recv_run_flit_file,(end_time - start_time)*1000))
         return
 
-    def reset(self):
-        """
-        复位硬件接口相关逻辑和硬件系统(darwin3 芯片, DMA 等)
-        Args: 
-            None
-        Returns:
-            None
-        """
-        self.__transmit_flit__(port=self.port[0], data_type=darwin3_device.CHIP_RESET)
-        print("Please check the information on the Darwin3 development board ")
-        print("to determine if the configuration was successful.")
-        return
-
-    def darwin3_init(self, freq=333):
-        """
-        按照指定频率配置 darwin3 芯片。
-        Args:
-            freq (int): 频率 (默认 333MHz, 仅支持 20MHz 和 333MHz)
-        Returns:
-            None
-        """
-        self.__transmit_flit__(port=self.port[0], data_type=darwin3_device.SET_FREQUENCY, freq=freq)
-        print("Please check the information on the Darwin3 development board ")
-        print("to determine if the configuration was successful.")
-        return
-
     def deploy_config(self):
         """
         在部署芯片上部署并使能相关核心, 同时清除神经元的相关状态
@@ -1416,7 +1393,33 @@ class darwin3_device(object):
         return
     
     # new part
-    def _transmit_flit(self, port, data_type, flit_bin:bytearray, recv=False, recv_run_flit_file : Path=None) -> StringIO:
+    def reset(self):
+        """
+        复位硬件接口相关逻辑和硬件系统(darwin3 芯片, DMA 等)
+        Args: 
+            None
+        Returns:
+            None
+        """
+        self._transmit_flit(port=self.port[0], data_type=darwin3_device.CHIP_RESET)
+        print("Please check the information on the Darwin3 development board ")
+        print("to determine if the configuration was successful.")
+        return
+    
+    def darwin3_init(self, freq=333):
+        """
+        按照指定频率配置 darwin3 芯片。
+        Args:
+            freq (int): 兼容参数，无实际作用
+        Returns:
+            None
+        """
+        self._transmit_flit(port=self.port[0], data_type=darwin3_device.SET_FREQUENCY)
+        print("Please check the information on the Darwin3 development board ")
+        print("to determine if the configuration was successful.")
+        return
+    
+    def _transmit_flit(self, port, data_type, flit_bin:bytearray=b'', recv=False, recv_run_flit_file : Path=None) -> BytesIO:
         """
         发包到darwin3, recv=True时接收darwin3返回来的包
         Args:
@@ -1451,34 +1454,18 @@ class darwin3_device(object):
         # end_time = time.time_ns()
         # print('===<3>=== tcp sent elapsed : %.3f ms' % ((end_time - start_time)/1000000))
 
+        fout = BytesIO()
         if recv:
-            fout = StringIO()
-            partial = b""  # 缓存不足4字节的数据
+            data_len=0
             while True:
                 request = trans.socket_inst.recv(10240)
                 if not request: break # 无数据时退出
-                
-                # 将新数据与缓存拼接
-                data = partial + request
-                data_len = len(data)
-
-                # 处理完整的4字节块
-                for i in range(0, data_len // 4 * 4, 4):
-                    chunk = data[i:i+4][::-1]
-                    hex_line = chunk.hex()  # 转为16进制字符串
-                    fout.write(hex_line + "\n")
-
-                # 更新缓存（剩余不足4字节的部分）
-                partial = data[data_len // 4 * 4 :]
-
-            # 处理最后不足4字节的剩余数据（可选）
-            if partial:
-                hex_line = partial.hex()
-                fout.write(hex_line + "\n")
-                print(f"received data is not intact (with {len(partial)} left)")
-
+                data_len += len(request)
+                fout.write(request)
+            if data_len % 4 !=0:
+                print(f"received data is not intact (with {len})!")
         if recv_run_flit_file is not None:
-            recv_run_flit_file.write_text(fout.getvalue())
+            recv_run_flit_file.write_bytes(fout.getvalue())
 
         trans.close()
         return fout
@@ -1495,7 +1482,7 @@ class darwin3_device(object):
         Returns:
             dwnc list
         """
-        dwnc_list=['0 cmd 0xc0000001\n']
+        dwnc_list=[(0,DWNC.COMMAND.CMD, 0xc0000001)]
         for _i in range(0, len(neuron_spike_list)):
             _time_step = _i + 1
             cur_spike_neuron_list = neuron_spike_list[_i]
@@ -1505,26 +1492,28 @@ class darwin3_device(object):
                     neuron_type = neuron_info[0]
                     targets_list = neuron_info[-1]
                     if neuron_type == 0:
-                        neu_idx = hex(neuron_info[1])   # 返回'0x'开头的字符串
+                        neu_idx = neuron_info[1]
                     elif neuron_type == 1:
-                        neu_idx = "0x0"
+                        neu_idx = 0x0
                     for target in targets_list:
                         x = target[0]
                         y = target[1]
-                        derd_id = hex(target[2])
-                        cur_line = f"{_time_step} spike {x} {y} {derd_id} {neu_idx}\n"
+                        derd_id = target[2]
+                        dwnc_list.append((_time_step,DWNC.COMMAND.SPIKE,x,y,derd_id,neu_idx))
+                        # cur_line = f"{_time_step} spike {x} {y} {derd_id} {neu_idx}"
                         # cur_line = str(_time_step) + " spike " + str(x) + " " + str(y) + " \"" + derd_id + "\""+" \""+ neu_idx +"\"\n"
-                        dwnc_list.append(cur_line)
+                        # dwnc_list.append(cur_line)
 
         steps = len(neuron_spike_list)
-        dwnc_list.append(f"{steps} cmd 0xc0000000\n")
+        dwnc_list.append((steps,DWNC.COMMAND.CMD, 0xc0000000))
 
         return dwnc_list
 
     def _excute_dwnc_command_west(self,dwnc_list,saving_dir:Path,saving_name,saving_input_flit=True,saving_recv=True,parser_log=True):
-        text_io_rslt,bin_io_rslt=gen_flit_by_dwnc_west(Path(self.app_path)/'output_files',dwnc_list)
+        bin_io_rslt=gen_flit_by_dwnc_mem_west(Path(self.app_path)/'output_files',dwnc_list)
         if saving_input_flit:
-            (saving_dir / (saving_name + '.txt')).write_bytes(text_io_rslt.getvalue())
+            raise NotImplementedError
+        #     (saving_dir / (saving_name + '.txt')).write_bytes(text_io_rslt.getvalue())
             # (saving_dir / (saving_name + '.bin')).write_bytes(bin_io_rslt.getvalue())
 
         # send
@@ -1533,8 +1522,8 @@ class darwin3_device(object):
                             flit_bin=bin_io_rslt.getvalue(),
                             recv=True,
                             recv_run_flit_file=None if not saving_recv else saving_dir / f"recv_{saving_name}.txt")
-
-        rslt = parse_flit(rslt.getvalue(),log=parser_log)
+        
+        rslt = parse_flit_bin(rslt.getvalue())
         return rslt
 
     def run_darwin3_with_spikes(self, spike_list: list,saving_input=False,saving_recv=False,print_log=False):
@@ -1551,21 +1540,10 @@ class darwin3_device(object):
         Returns:
             result (list): 本次运行结束时硬件返回给应用的脉冲
         """
-        files = map(lambda _p : Path(self.app_path)/ 'input_files' / _p, [
-            'recv_run_flit.bin',
-            'recv_run_flit.txt',
-            'spikes.dwnc',
-            'run_flitin.bin',
-            'run_flitin.txt',
-            'run_input.dwnc'
-        ])
-        for file in files:
-            if file.exists(): os.remove(file)
-        
         # 生成spike的dwnc
         dwnc_list=self._gen_spike_input_dwnc(spike_list)
         if saving_input:
-            (self._new_app_path / 'input_files' / 'run_input.dwnc').write_text(''.join(dwnc_list))
+            (self._new_app_path / 'input_files' / 'run_input.dwnc').write_text('\n'.join(dwnc_list))
 
         rslt=self._excute_dwnc_command_west(
             dwnc_list,
@@ -1574,6 +1552,7 @@ class darwin3_device(object):
             saving_input,
             saving_recv,
             print_log)
+        # input()
         return spikes(self._neuron_id_json_list,rslt,len(spike_list))
 
     def dump_memory(self,dump_request:list[tuple],log=False,saving_intermediate_dir: Path | None =None) -> tuple[list[ResultBase]]:

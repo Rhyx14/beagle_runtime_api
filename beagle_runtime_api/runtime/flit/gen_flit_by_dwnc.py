@@ -2,7 +2,46 @@ import numpy as np
 import os,struct
 from io import StringIO,BytesIO
 from .gen_flit import gen_flit,gen_flit_east,gen_flit_parallel,gen_flit_parallel_east
+from .gen_flit_fast import gen_flit_mem_west
 from .flit_constant import FLIT_BINARY_LENGTH,FLIT_BINARY_LENGTH_VALUE,FLIT_TEXT_LENGTH,FLIT_BINARY_NUM_VALUE,FLIT_TEXT_LENGTH_BYTE,FLIT_TEXT_NUM_BYTE
+from ..dwnc import DWNC
+from .flit_gen_status import FlitGenStatus
+def gen_flit_by_dwnc_mem_west(cfg_path, dwnc_list: list[tuple], direct=0):
+    """
+    这个函数gen_flit_by_fn负责根据输入文件（通常是.dwnc文件）生成FLIT数据包，
+    FLIT数据包是一种用于神经网络中数据传输的格式，
+    它包含了操作类型、目标地址、数据值和其他控制信息。
+    对于读操作，它可能需要从其他文件中读取数据并生成对应的FLIT数据包。
+    对于写操作，它需要将数据写入FLIT数据包中。
+    最后，它使用gen_flit函数生成FLIT数据包，并将这些数据包写入到文本和二进制文件中。
+    dwnc_list: dwnc列表
+    fin_bin: 要保存到的内存位置（编译完的字节）
+    """
+    # print("===========================")
+    # config_list = {
+    #     "last_vc": 1,
+    #     "tick": 0,
+    #     "start_tick": -1,
+    #     "stop_tick": -1,
+    #     "clear_tick": -1,
+    #     "pkg_num": 0,
+    # }
+    flit_gen_status=FlitGenStatus(last_vc=1,tick=0,start_tick=-1,stop_tick=-1,clear_tick=-1,pkg_num=0)
+    bytes_io=BytesIO()
+    for _dwnc in dwnc_list:
+        match _dwnc[1]:
+            case DWNC.COMMAND.SPIKE | DWNC.COMMAND.CMD:
+                gen_flit_mem_west(
+                _dwnc,
+                bytes_io,
+                direct,
+                x_from=-1,
+                y_from=-1,
+                flit_gen_status=flit_gen_status)
+            case _:
+                raise NotImplementedError
+        
+    return bytes_io
 
 def gen_flit_by_dwnc_west(cfg_path, dwnc_list: list[str], direct=0):
     """
