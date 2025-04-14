@@ -1,12 +1,6 @@
 import struct,random
 from .misc import onehot2bin
-# 定义flit包长度等的相关常量
-FLIT_TEXT_LENGTH_BYTE = 8
-FLIT_TEXT_NUM_BYTE = 4
-FLIT_TEXT_LENGTH = FLIT_TEXT_NUM_BYTE * (FLIT_TEXT_LENGTH_BYTE + 1)
-FLIT_BINARY_LENGTH_VALUE = 4
-FLIT_BINARY_NUM_VALUE = 4
-FLIT_BINARY_LENGTH = FLIT_BINARY_NUM_VALUE * FLIT_BINARY_LENGTH_VALUE
+from .flit_constant import FLIT_BINARY_LENGTH,FLIT_BINARY_LENGTH_VALUE,FLIT_TEXT_LENGTH,FLIT_BINARY_NUM_VALUE,FLIT_TEXT_LENGTH_BYTE,FLIT_TEXT_NUM_BYTE
 
 def gen_flit(item, fin, fbin, direct=0, x_from=-1, y_from=-1, **config_list):
     """
@@ -26,9 +20,7 @@ def gen_flit(item, fin, fbin, direct=0, x_from=-1, y_from=-1, **config_list):
     cmd = "0xc0000000"
     if item[1] == "cmd":
         cmd = item[2]
-    while isinstance(cmd, str):
-        cmd = int(cmd,16)
-        # cmd = eval(cmd)
+    cmd = int(cmd,16)
     cmd = cmd >> 24
     if (
         tik != config_list["tick"]
@@ -40,14 +32,14 @@ def gen_flit(item, fin, fbin, direct=0, x_from=-1, y_from=-1, **config_list):
         cmd_f = 0x3
         if direct == 0:
             l = (cmd_f << 30) + (cmd << 24) + arg
-            ss_l = b"%08x\n" % l
-            fin.write(ss_l)
+            # ss_l = b"%08x\n" % l
+            # fin.write(ss_l)
             fbin.write(struct.pack("I", l))
         else:
             l = (cmd_f << 30) + (cmd << 24)
-            ss_l = b"%08x\n" % l
+            # ss_l = b"%08x\n" % l
             for i in range(arg + 1):
-                fin.write(ss_l)
+                # fin.write(ss_l)
                 fbin.write(struct.pack("I", l))
     if tik > 0:
         config_list["tick"] = tik
@@ -167,16 +159,17 @@ def gen_flit(item, fin, fbin, direct=0, x_from=-1, y_from=-1, **config_list):
                 y_src = 15
     if x_dff > 0:
         if x_sig == 1:
-            port = "01000"
+            port = 3 #"01000"
+            # port= 
         else:
-            port = "00010"
+            port = 1 # "00010"
     else:
         if y_dff == 0:
-            port = "00001"
+            port = 0 #"00001"
         elif y_sig == 1:
-            port = "00100"
+            port = 3 # "00100"
         else:
-            port = "10000"
+            port = 4 #"10000"
     route_id = y
     if y_from != -1:
         route_id = y_from
@@ -191,217 +184,16 @@ def gen_flit(item, fin, fbin, direct=0, x_from=-1, y_from=-1, **config_list):
         if y_dff == 0:
             y_sig = 1
     direct = 2
-    cmd_tmp = cmd
-    while isinstance(cmd_tmp, str):
-        cmd_tmp = int(cmd_tmp,16)
-        # cmd_tmp = eval(cmd_tmp)
-    pclass = op
-    vcnum = (route_id & 0xF) + (direct << 6)
-    vcnum2 = direct << 6
-    if direct == 1:
-        vcnum2 = direct << 6
-    # port = eval("0b" + port)
-    port = int(port,2)
-    port = onehot2bin(port)
-    if pclass == "cmd":
-        while isinstance(cmd, str):
-            cmd = int(cmd,16)
-            # cmd = eval(cmd)
-        l = cmd
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-    if pclass == "write_risc" or pclass == "read_risc_ack":
-        while isinstance(addr, str):
-            addr = int(addr,16)
-            # addr = eval(addr)
-        while isinstance(data, str):
-            data = int(data,16)
-            # data = eval(data)
-        if pclass == "read_risc_ack":
-            l = (
-                (0x2 << 30)
-                + (route_id << 25)
-                + (0x1 << 22)
-                + (port << 19)
-                + (x_sig << 18)
-                + (x_dff << 14)
-                + (y_sig << 13)
-                + (y_dff << 9)
-                + (x_src << 5)
-                + (y_src << 1)
-                + (1 << 0)
-            )
-        else:
-            l = (
-                (0x2 << 30)
-                + (route_id << 25)
-                + (0x1 << 22)
-                + (port << 19)
-                + (x_sig << 18)
-                + (x_dff << 14)
-                + (y_sig << 13)
-                + (y_dff << 9)
-                + (x_src << 5)
-                + (y_src << 1)
-            )
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x0 << 30) + (addr << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x0 << 30) + ((data & 0xFFFF0000) >> 1)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x1 << 30) + ((data & 0xFFFF) << 15)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-    if pclass == "write" or pclass == "read_ack":
-        while isinstance(addr, str):
-            addr = int(addr,16)
-            # addr = eval(addr)
-        while isinstance(data, str):
-            data = int(data,16)
-            # data = eval(data)
-        if pclass == "read_ack":
-            l = (
-                (0x2 << 30)
-                + (route_id << 25)
-                + (0x1 << 22)
-                + (port << 19)
-                + (x_sig << 18)
-                + (x_dff << 14)
-                + (y_sig << 13)
-                + (y_dff << 9)
-                + (x_src << 5)
-                + (y_src << 1)
-                + (1 << 0)
-            )
-        else:
-            l = (
-                (0x2 << 30)
-                + (route_id << 25)
-                + (0x1 << 22)
-                + (port << 19)
-                + (x_sig << 18)
-                + (x_dff << 14)
-                + (y_sig << 13)
-                + (y_dff << 9)
-                + (x_src << 5)
-                + (y_src << 1)
-            )
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x0 << 30) + (addr << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x0 << 30) + ((data & 0xFFFFFF000000) >> 21)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x1 << 30) + ((data & 0xFFFFFF) << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-    if pclass == "read":
-        while isinstance(addr, str):
-            # addr = int(addr,16)
-            addr = eval(eval(addr))
-        l = (
-            (0x2 << 30)
-            + (route_id << 25)
-            + (0x2 << 22)
-            + (port << 19)
-            + (x_sig << 18)
-            + (x_dff << 14)
-            + (y_sig << 13)
-            + (y_dff << 9)
-            + (x_src << 5)
-            + (y_src << 1)
-        )
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x1 << 30) + (addr << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-    if pclass == "flow":
-        data1 = addr
-        while isinstance(data1, str):
-            data1 = int(data1,16)
-            # data1 = eval(data1)
-        l = (
-            (0x2 << 30)
-            + (route_id << 25)
-            + (0x3 << 22)
-            + (port << 19)
-            + (x_sig << 18)
-            + (x_dff << 14)
-            + (y_sig << 13)
-            + (y_dff << 9)
-            + (x_src << 5)
-            + (y_src << 1)
-        )
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x1 << 30) + (data1 << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-    if pclass == "flow_ack":
-        data1 = addr
-        while isinstance(data1, str):
-            data1 = int(data1,16)
-            # data1 = eval(data1)
-        data2 = data
-        while isinstance(data2, str):
-            data2 = int(data2,16)
-            # data2 = eval(data2)
-        l = (
-            (0x2 << 30)
-            + (route_id << 25)
-            + (0x7 << 22)
-            + (port << 19)
-            + (x_sig << 18)
-            + (x_dff << 14)
-            + (y_sig << 13)
-            + (y_dff << 9)
-            + (x_src << 5)
-            + (y_src << 1)
-        )
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x0 << 30) + (data1 << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x0 << 30) + ((data2 & 0x3FFFFFF8000000) >> 24)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x1 << 30) + ((data2 & 0x7FFFFFF) << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-    if pclass == "spike":
-        dedr_id = addr
-        neu_idx = data
-        while isinstance(dedr_id, str):
-            dedr_id = int(dedr_id,16)
-            # dedr_id = eval(dedr_id)
-        while isinstance(neu_idx, str):
-            neu_idx = int(neu_idx,16)
-            # neu_idx = eval(neu_idx)
-        l = (
+
+    # vcnum = (route_id & 0xF) + (direct << 6)
+    # vcnum2 = direct << 6
+    # if direct == 1:
+    #     vcnum2 = direct << 6
+
+    if op == "spike":
+        dedr_id = int(addr,16)
+        neu_idx = int(data,16)
+        l1 = (
             (0x2 << 30)
             + (route_id << 25)
             + (0x0 << 22)
@@ -413,22 +205,12 @@ def gen_flit(item, fin, fbin, direct=0, x_from=-1, y_from=-1, **config_list):
             + (x_src << 5)
             + (y_src << 1)
         )
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-        l = (0x1 << 30) + (dedr_id << 15) + (neu_idx << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
-        fbin.write(struct.pack("I", l))
-    if pclass == "spike_short":
-        dedr_id = addr
-        neu_idx = data
-        while isinstance(dedr_id, str):
-            dedr_id = int(dedr_id,16)
-            # dedr_id = eval(dedr_id)
-        while isinstance(neu_idx, str):
-            neu_idx = int(neu_idx,16)
-            # neu_idx = eval(neu_idx)
+        l2 = (0x1 << 30) + (dedr_id << 15) + (neu_idx << 3)
+        fbin.write(struct.pack("II", l1,l2))
+
+    elif op == "spike_short":
+        dedr_id = int(addr,16)
+        neu_idx = int(data,16)
         l = (
             (0x2 << 30)
             + (route_id << 25)
@@ -441,22 +223,149 @@ def gen_flit(item, fin, fbin, direct=0, x_from=-1, y_from=-1, **config_list):
             + (x_src << 5)
             + (y_src << 1)
         )
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
         fbin.write(struct.pack("I", l))
         l = (0x1 << 30) + (dedr_id << 15) + (neu_idx << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
         fbin.write(struct.pack("I", l))
-    if pclass == "reward":
-        dedr_id = addr
-        neu_idx = data
-        while isinstance(dedr_id, str):
-            dedr_id = int(dedr_id,16)
-            # dedr_id = eval(dedr_id)
-        while isinstance(neu_idx, str):
-            neu_idx = int(neu_idx,16)
-            # neu_idx = eval(neu_idx)
+
+    elif op == "cmd":
+        l = int(cmd,16)
+        fbin.write(struct.pack("I", l))
+
+    elif op == "write" or op == "read_ack":
+        addr=int(addr,16)
+        data=int(data,16)
+        if op == "read_ack":
+            l1 = (
+                (0x2 << 30)
+                + (route_id << 25)
+                + (0x1 << 22)
+                + (port << 19)
+                + (x_sig << 18)
+                + (x_dff << 14)
+                + (y_sig << 13)
+                + (y_dff << 9)
+                + (x_src << 5)
+                + (y_src << 1)
+                + (1 << 0)
+            )
+        else:
+            l1 = (
+                (0x2 << 30)
+                + (route_id << 25)
+                + (0x1 << 22)
+                + (port << 19)
+                + (x_sig << 18)
+                + (x_dff << 14)
+                + (y_sig << 13)
+                + (y_dff << 9)
+                + (x_src << 5)
+                + (y_src << 1)
+            )
+        l2 = (0x0 << 30) + (addr << 3)
+        l3 = (0x0 << 30) + ((data & 0xFFFFFF000000) >> 21)
+        l4 = (0x1 << 30) + ((data & 0xFFFFFF) << 3)
+
+        fbin.write(struct.pack("IIII",l1,l2,l3,l4))
+
+    elif op == "read":
+        l = (
+            (0x2 << 30)
+            + (route_id << 25)
+            + (0x2 << 22)
+            + (port << 19)
+            + (x_sig << 18)
+            + (x_dff << 14)
+            + (y_sig << 13)
+            + (y_dff << 9)
+            + (x_src << 5)
+            + (y_src << 1)
+        )
+        fbin.write(struct.pack("I", l))
+        l = (0x1 << 30) + (addr << 3)
+        fbin.write(struct.pack("I", l))
+
+    elif op == "write_risc" or op == "read_risc_ack":
+        addr=int(addr,16)
+        data=int(data,16)
+        if op == "read_risc_ack":
+            l = (
+                (0x2 << 30)
+                + (route_id << 25)
+                + (0x1 << 22)
+                + (port << 19)
+                + (x_sig << 18)
+                + (x_dff << 14)
+                + (y_sig << 13)
+                + (y_dff << 9)
+                + (x_src << 5)
+                + (y_src << 1)
+                + (1 << 0)
+            )
+        else:
+            l = (
+                (0x2 << 30)
+                + (route_id << 25)
+                + (0x1 << 22)
+                + (port << 19)
+                + (x_sig << 18)
+                + (x_dff << 14)
+                + (y_sig << 13)
+                + (y_dff << 9)
+                + (x_src << 5)
+                + (y_src << 1)
+            )
+        fbin.write(struct.pack("I", l))
+        l = (0x0 << 30) + (addr << 3)
+        fbin.write(struct.pack("I", l))
+        l = (0x0 << 30) + ((data & 0xFFFF0000) >> 1)
+        fbin.write(struct.pack("I", l))
+        l = (0x1 << 30) + ((data & 0xFFFF) << 15)
+        fbin.write(struct.pack("I", l))
+
+    elif op == "flow":
+        data1 = int(addr,16)
+        l = (
+            (0x2 << 30)
+            + (route_id << 25)
+            + (0x3 << 22)
+            + (port << 19)
+            + (x_sig << 18)
+            + (x_dff << 14)
+            + (y_sig << 13)
+            + (y_dff << 9)
+            + (x_src << 5)
+            + (y_src << 1)
+        )
+        fbin.write(struct.pack("I", l))
+        l = (0x1 << 30) + (data1 << 3)
+        fbin.write(struct.pack("I", l))
+
+    elif op == "flow_ack":
+        data1 = int(addr,16)
+        data2 = int(data,16)
+        l = (
+            (0x2 << 30)
+            + (route_id << 25)
+            + (0x7 << 22)
+            + (port << 19)
+            + (x_sig << 18)
+            + (x_dff << 14)
+            + (y_sig << 13)
+            + (y_dff << 9)
+            + (x_src << 5)
+            + (y_src << 1)
+        )
+        fbin.write(struct.pack("I", l))
+        l = (0x0 << 30) + (data1 << 3)
+        fbin.write(struct.pack("I", l))
+        l = (0x0 << 30) + ((data2 & 0x3FFFFFF8000000) >> 24)
+        fbin.write(struct.pack("I", l))
+        l = (0x1 << 30) + ((data2 & 0x7FFFFFF) << 3)
+        fbin.write(struct.pack("I", l))
+
+    elif op == "reward":
+        dedr_id = int(addr,16)
+        neu_idx = int(data,16)
         l = (
             (0x2 << 30)
             + (route_id << 25)
@@ -469,22 +378,13 @@ def gen_flit(item, fin, fbin, direct=0, x_from=-1, y_from=-1, **config_list):
             + (x_src << 5)
             + (y_src << 1)
         )
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
         fbin.write(struct.pack("I", l))
         l = (0x1 << 30) + (dedr_id << 15) + (neu_idx << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
         fbin.write(struct.pack("I", l))
-    if pclass == "reward_short":
-        dedr_id = addr
-        neu_idx = data
-        while isinstance(dedr_id, str):
-            dedr_id = int(dedr_id,16)
-            # dedr_id = eval(dedr_id)
-        while isinstance(neu_idx, str):
-            neu_idx = int(neu_idx,16)
-            # neu_idx = eval(neu_idx)
+
+    elif op == "reward_short":
+        dedr_id = int(addr,16)
+        neu_idx = int(data,16)
         l = (
             (0x2 << 30)
             + (route_id << 25)
@@ -497,13 +397,12 @@ def gen_flit(item, fin, fbin, direct=0, x_from=-1, y_from=-1, **config_list):
             + (x_src << 5)
             + (y_src << 1)
         )
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
         fbin.write(struct.pack("I", l))
         l = (0x1 << 30) + (dedr_id << 15) + (neu_idx << 3)
-        ss_l = b"%08x\n" % l
-        fin.write(ss_l)
         fbin.write(struct.pack("I", l))
+
+    else:
+        raise ValueError()
 
 def gen_flit_east(
     item, fin, fbin, direct=0, x_from=-1, y_from=-1, **config_list
