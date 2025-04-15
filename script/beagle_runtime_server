@@ -10,7 +10,7 @@ import fcntl
 import threading
 import subprocess
 
-darwin3_runtime_node_dir = sys.prefix + "/darwin3_runtime_node"
+DARWIN3_RUNTIME_NODE_DIR = sys.prefix + "/darwin3_runtime_node"
 
 s1 = threading.Semaphore(1)
 receive_count : int = 0
@@ -70,7 +70,7 @@ class DMA_Transmitter(object):
             print("===<2>=== %s is larger than %dMB" % (flit_bin, DMA_BUF_MAX>>20))
             print("===<2>=== send flit length failed")                                 
             return 0                                                                   
-        print("flit length: %d" % length)                                 
+        # print("flit length: %d" % length)                                 
         with mmap.mmap(self.tx_dma_fd,DMA_MAP_SIZE,mmap.MAP_SHARED,mmap.PROT_WRITE | mmap.PROT_READ) as mm:
             mm[DMA_LENGTH:DMA_LENGTH+4]=struct.pack('I',length)                                            
             mm[:length]=flit_bin                                                                           
@@ -97,7 +97,7 @@ class DMA_Transmitter(object):
                     last_flit = struct.unpack('I',mm[rx_length-4:rx_length])[0]                            
                     last = last_flit == 0xffffffff                                                         
                     if last:
-                        rx_length-=4;
+                        rx_length-=4
                     recv+=mm[:rx_length]
                 else:
                     last = True
@@ -106,9 +106,7 @@ class DMA_Transmitter(object):
         return recv 
 def recv(trans, client):
     s1.acquire()
-    with open("flitout.bin","wb") as f:
-        flits = trans.recv_flit_bin()
-        f.write(flits)
+    flits = trans.recv_flit_bin()
     client.sendall(flits)
     s1.release()
 
@@ -128,16 +126,15 @@ def start_tcp_server(ip, port, id):
     except socket.error:
         print("fail to listen on ip %s, port %s" % server_address)
         sys.exit(1)
-    receive_count = 0
+
     trans = DMA_Transmitter(id)
-    #trans.open()
 
     while True:
         recv_len  = 0
         length    = 0
 
         while True:
-            print("\nwaiting for connection")
+            # print("\nwaiting for connection")
             try:
                 client, addr = sock.accept()
                 stime = time.time_ns()
@@ -146,20 +143,7 @@ def start_tcp_server(ip, port, id):
                 print("Kill by user!")
                 sock.close() 
                 sys.exit(1)
-            #print("having a connection")
-            print("addr is ", addr)
             break
-            #if active_ip != "":
-            #    print("active ip is %s" % active_ip)
-            #if active_ip == "" or active_ip == addr[0]:
-            #    active_ip = addr[0]
-            #    print("set active ip to %s" % active_ip)
-            #    break
-            #else:
-            #    print("there is still active ip %s" % active_ip)
-            #    print("new ip connection will be ignored!")
-            #    break
-            #    client.close()
 
         while True:
             try:
@@ -169,51 +153,34 @@ def start_tcp_server(ip, port, id):
                 trans.close()
                 length = 0
                 break
-            
-            # if len(msg) == 4:
-            #     receive_count += 1
-            #     length = struct.unpack('I',msg)[0]
-            #     print("recv at %d times with %d flits" % (receive_count,length))
-            #     if length > 0:
-            #         trans.socket_inst.sendall(msg)
-            #         try:
-            #             msg = trans.socket_inst.recv(1024)
-            #         except socket.error:
-            #             print("\nrecv error\n")
-            #             length = 0
-            #             break
-            #         client.sendall(msg)
-            # else:
 
             recv_len += len(msg)
             start = 0
             if length == 0:
-                #f = open("flitin.bin","wb")
                 if recv_len < 8:
                     client.close()
                     break
-                length = struct.unpack('I',msg[0:4])[0]
-                data_type = struct.unpack('I',msg[4:8])[0]
+                length,data_type = struct.unpack('II',msg[0:8])
+                # data_type = struct.unpack('I',msg[4:8])[0]
                 recv_len -= 8
                 start = 8
                 if data_type == SET_FREQUENCY:
                     print("freq=%dM" % length)
-                else:
-                    print("length=%d" % length)
-                print("data_type=%08x" % data_type)
+                # else:
+                    # print("length=%d" % length)
+                # print("data_type=%08x" % data_type)
                 if data_type == CHIP_RESET:
                     recv_len -= length * 4
                     length = 0
                     trans.close()
-                    # os.system(darwin3_runtime_node_dir + "/script/chip_reset")
-                    os.system("bash " + darwin3_runtime_node_dir + "/script/restart_dma")
-                    os.system("bash " + darwin3_runtime_node_dir + "/script/restart_dma")
+                    os.system("bash " + DARWIN3_RUNTIME_NODE_DIR + "/script/restart_dma")
+                    os.system("bash " + DARWIN3_RUNTIME_NODE_DIR + "/script/restart_dma")
                     trans.open()
                 elif data_type == SET_FREQUENCY:
                     freq = length
                     length = 0
                     trans.close()
-                    subprocess.run([darwin3_runtime_node_dir + "/script/flits_sender", darwin3_runtime_node_dir + f"/chip_test/reset_clock/pll_clock_{freq}M.bin"],check=True)  # 如果命令失败则引发异常
+                    subprocess.run([DARWIN3_RUNTIME_NODE_DIR + "/script/flits_sender", DARWIN3_RUNTIME_NODE_DIR + f"/chip_test/reset_clock/pll_clock_{freq}M.bin"],check=True)  # 如果命令失败则引发异常
                     # subprocess.run(["/home/root/scripts/flits_sender", f"/home/root/chip_test/reset_clock/pll_clock_{freq}M.bin"],check=True)  # 如果命令失败则引发异常
                     trans.open()
                 #f.write(msg[8:])
@@ -222,21 +189,15 @@ def start_tcp_server(ip, port, id):
                     thread.start()
             else:
                 pass
-                #f.write(msg)
-            #print("recv_len=%d" % recv_len)
-            #begin_time = round(time.time() * 1000)
+
             if length > 0:
                 trans.send_flit_bin(msg[start:])
-            #end_time = round(time.time() * 1000)
-            #delta_time = end_time - begin_time
-            #if delta_time > 5:
-                #print("delta_time =%d" % delta_time)
 
-            if recv_len == length * 4 and length > 0:
-                #f.close()
-                etime = time.time_ns()                                              
-                print("speed is %.3f Mbps" % (8*recv_len*1000000000/(etime-stime)/2**20))
-                #print("waiting for respond")
+            # if recv_len == length * 4 and length > 0:
+                # etime = time.time_ns()                                              
+                # print("speed is %.3f Mbps" % (8*recv_len*1000000000/(etime-stime)/2**20))
+                # pass
+
 
             if msg == 0 or recv_len == length * 4:
                 s1.acquire()
@@ -254,8 +215,7 @@ def start_tcp_server(ip, port, id):
     sock.close() 
 
 if __name__=='__main__':
-    os.system("bash " + darwin3_runtime_node_dir + "/script/restart_dma")
-    os.system("bash " + darwin3_runtime_node_dir + "/script/restart_dma")
+    os.system("bash " + DARWIN3_RUNTIME_NODE_DIR + "/script/restart_dma")
     while(True):
         active_ip = ""
         id = 0
