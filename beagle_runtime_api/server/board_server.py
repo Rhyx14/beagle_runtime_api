@@ -1,4 +1,4 @@
-#! /usr/bin/python3
+#!/usr/bin/python3
 
 import socket
 import sys
@@ -213,8 +213,7 @@ def start_tcp_server(ip, port, id):
  
     print("\n==Finish, close connect")
     sock.close() 
-
-if __name__=='__main__':
+def main():
     os.system("bash " + DARWIN3_RUNTIME_NODE_DIR + "/script/restart_dma")
     while(True):
         active_ip = ""
@@ -238,3 +237,6 @@ if __name__=='__main__':
         server_thread2.join()
         
         time.sleep(1)
+
+if __name__=='__main__':
+    main()
