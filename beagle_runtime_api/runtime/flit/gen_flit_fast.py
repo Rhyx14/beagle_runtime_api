@@ -3,11 +3,15 @@ from .misc import onehot2bin
 from .flit_constant import FLIT_BINARY_LENGTH,FLIT_BINARY_LENGTH_VALUE,FLIT_TEXT_LENGTH,FLIT_BINARY_NUM_VALUE,FLIT_TEXT_LENGTH_BYTE,FLIT_TEXT_NUM_BYTE
 from .flit_gen_status import FlitGenStatus
 from ..dwnc import DWNC
+pack_one=struct.Struct('I')
+pack_two=struct.Struct('II')
+pack_four=struct.Struct('IIII')
+
 def gen_flit_mem_west(dwnc:tuple, fbin, direct, x_from, y_from, flit_gen_status:FlitGenStatus):
     """
     dwnc -> flit
     """
-    
+
     if direct == 0:
         flit_gen_status.pkg_num += 1
     tik = dwnc[0]
@@ -198,7 +202,8 @@ def gen_flit_mem_west(dwnc:tuple, fbin, direct, x_from, y_from, flit_gen_status:
             + (y_src << 1)
         )
         l2 = (0x1 << 30) + (dedr_id << 15) + (neu_idx << 3)
-        fbin.write(struct.pack("II", l1,l2))
+        # fbin.write(struct.pack("II", l1,l2))
+        fbin.write(pack_two.pack(l1,l2))
 
     elif op == DWNC.COMMAND.SPIKE_SHORT:
         dedr_id = addr
@@ -254,7 +259,8 @@ def gen_flit_mem_west(dwnc:tuple, fbin, direct, x_from, y_from, flit_gen_status:
         l3 = (0x0 << 30) + ((data & 0xFFFFFF000000) >> 21)
         l4 = (0x1 << 30) + ((data & 0xFFFFFF) << 3)
 
-        fbin.write(struct.pack("IIII",l1,l2,l3,l4))
+        # fbin.write(struct.pack("IIII",l1,l2,l3,l4))
+        fbin.write(pack_four(l1,l2,l3,l4))
 
     elif op == DWNC.COMMAND.READ:
         l = (
