@@ -1,9 +1,5 @@
 from ctypes import LittleEndianStructure,c_int,c_uint
 
-FLIT_TYPE_BODY=0
-FLIT_TYPE_TAIL=1
-FLIT_TYPE_HEAD=2
-FLIT_TYPE_CMD=3
 # flit type
 class Command(LittleEndianStructure):
     _fields_=[

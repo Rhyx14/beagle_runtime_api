@@ -6,17 +6,13 @@ from pathlib import Path
 
 from .tcp_transmitter import Transmitter
 from .parser.result_base import ResultBase
-from .parser.parse_flit import parse_flit_bin
-from .parser.decoder import spikes
 
 from .darwin_flit.decode import decode
-from .darwin_flit.parse_spike import parse_spike
+from .darwin_flit.encode import encode
+from .darwin_flit.result import SpikeResult
+from .darwin_flit. nc_pkgb import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD
+from .darwin_flit.parse_config import parse_compiler_config
 
-from .flit.gen_flit_by_dwnc import gen_flit_by_dwnc_mem_west
-from .flit.flit_constant import FLIT_BINARY_LENGTH,FLIT_BINARY_LENGTH_VALUE,FLIT_BINARY_NUM_VALUE,FLIT_TEXT_LENGTH,FLIT_TEXT_LENGTH_BYTE,FLIT_TEXT_NUM_BYTE
-from .flit.gen_flit import gen_flit,gen_flit_east,gen_flit_parallel,gen_flit_parallel_east
-
-from .dwnc import DWNC
 from x_secretary.utils.time import measure_time
 
 class darwin3_device(object):
@@ -111,13 +107,14 @@ class darwin3_device(object):
         # app_path (str): 存储应用的目录
         self.app_path=Path(app_path)
         # config_path (str): 配置文件目录
+
+        self._cache_path=self.app_path / 'beagle_cache'
+        Path.mkdir(self._cache_path,exist_ok=True,parents=True)
+
         self.config_path = self.app_path / "config_files"
         # deploy_path (str): 部署文件目录 (.txt && .bin)
         self.deploy_path = self.app_path / "deploy_files/"
-        # input_path (str): 输入文件目录 (.txt && .bin)
-        self.input_path = self.app_path / "input_files/"
-        # output_path (str): 输出文件目录 (.txt && .bin)
-        self.output_path = self.app_path / "output_files/"
+
         # debug_path (str): 查询所有神经元状态信息存储目录 (仅用于调试)
         self.debug_path = self.app_path / "debug_files/"
         if not os.path.exists(self.deploy_path):
@@ -191,1048 +188,6 @@ class darwin3_device(object):
             self.delay_neuron = {}
         
         return
-    
-    def __gen_flit_by_fn__(self, fn, fin, fbin, direct=0, tc="", **config_list):
-        """
-        这个函数gen_flit_by_fn负责根据输入文件（通常是.dwnc文件）生成FLIT数据包，
-        并将这些数据包写入到文本和二进制文件中。
-        FLIT数据包是一种用于神经网络中数据传输的格式，
-        它包含了操作类型、目标地址、数据值和其他控制信息。
-        函数首先检查输入文件是否存在，如果不存在则直接返回。
-        然后，它打开文件并读取所有行，遍历每一行来处理不同的操作。
-        对于读操作，它可能需要从其他文件中读取数据并生成对应的FLIT数据包。
-        对于写操作，它需要将数据写入FLIT数据包中。
-        最后，它使用gen_flit函数生成FLIT数据包，并将这些数据包写入到文本和二进制文件中。
-        这个函数通过递归调用自己来处理包含的文件，
-        这允许它处理复杂的.dwnc文件，这些文件可能包含对其他文件的引用。
-        """
-        # print("===========================")
-        # print("into gen_flit_by_fn")
-        # print("file: " + fn)
-        # print("config list before:")
-        # print(config_list)
-        tc = self.config_path
-        while config_list.get("config_list") != None:
-            config_list = config_list["config_list"]
-        # print("config list after:")
-        # print(config_list)
-        if not os.path.exists(fn):
-            return
-        with open(fn, "r", encoding="utf-8") as load_f:
-            # print("config list[2]:")
-            # print(config_list)
-            lines = load_f.readlines()
-            for items in lines:
-                # print("line: ")
-                # print(items)
-                # print("config list[3]:")
-                # print(config_list)
-                item = items.split()
-                if len(item) < 2:
-                    continue
-                if "#" in item[0]:
-                    continue
-                if item[0] == "<<":
-                    self.__gen_flit_by_fn__(
-                        self.config_path / item[1],
-                        fin,
-                        fbin,
-                        direct,
-                        tc,
-                        config_list=config_list,
-                    )
-                elif item[1] == "read" and len(item) >= 6:
-                    tmp = item
-                    # addr = eval(item[4])
-                    addr = int(item[4],16)
-                    while isinstance(item[5], str):
-                        item[5] = int(item[5],16)
-                        # item[5] = eval(item[5])
-                    for i in range(int(item[5])):
-                        tmp[4] = '"%s"' % hex(addr + i)
-                        darwin3_device.__gen_flit__(
-                            tmp,
-                            fin,
-                            fbin,
-                            direct,
-                            x_from=-1,
-                            y_from=-1,
-                            config_list=config_list,
-                        )
-                elif (
-                    item[1] == "write"
-                    or items[1] == "write_ram"
-                    or item[1] == "read_ack"
-                    or item[1] == "write_risc"
-                    or item[1] == "read_risc_ack"
-                ) and len(item) == 5:
-                    if item[1] == "write_ram":
-                        item[1] = "write"
-                    tmp = item
-                    tmp.append("")
-                    if os.path.exists(tc / item[4]):
-                        with open(tc / item[4], "rb") as write_f:
-                            tot = int.from_bytes(
-                                write_f.read(4), byteorder="little", signed=False
-                            )
-                            for segment in range(tot):
-                                area_id = int(write_f.read(1)[0])
-                                t = area_id & 0xF
-                                config_word_equal = (t & 0x80) != 0
-                                addr = int.from_bytes(
-                                    write_f.read(4), byteorder="little", signed=False
-                                )
-                                length = int.from_bytes(
-                                    write_f.read(4), byteorder="little", signed=False
-                                )
-                                bo = "little"
-                                bs = 4
-                                di = 1
-                                # Dedr
-                                if t == 0x01:
-                                    addr += 0x10000
-                                    bs = 6
-                                # Wgtsum
-                                elif t == 0x02:
-                                    addr += 0x4000
-                                    bs = 2
-                                # Inference State
-                                elif t == 0x03:
-                                    addr += 0x10000
-                                    bs = 6
-                                    di = -1
-                                # Voltage
-                                elif t == 0x04:
-                                    addr += 0x2000
-                                    bs = 2
-                                # Axon
-                                elif t == 0x05:
-                                    addr += 0x8000
-                                    bs = 4
-                                # Learn State
-                                elif t == 0x06:
-                                    addr += 0x10000
-                                    bs = 6
-                                    di = -1
-                                # Inst
-                                elif t == 0x07:
-                                    addr += 0x1000
-                                    bs = 2
-                                # Reg
-                                elif t == 0x08:
-                                    addr += 0x800
-                                    bs = 2
-                                size = length if config_word_equal else int(length / bs)
-                                x, y = int(item[2]), int(item[3])
-                                address = np.arange(addr, addr + size * di, di)
-                                if config_word_equal:
-                                    value = struct.unpack_from(
-                                        "<Q", write_f.read(bs) + b"\x00" * (8 - bs)
-                                    )[0]
-                                    text_buffer = bytes(FLIT_TEXT_LENGTH)
-                                    binary_buffer = bytes(
-                                        FLIT_BINARY_LENGTH
-                                    )
-                                    gen_flit_parallel(
-                                        x,
-                                        y,
-                                        address,
-                                        value,
-                                        text_buffer,
-                                        0,
-                                        binary_buffer,
-                                        0,
-                                        config_list=config_list,
-                                    )
-                                    text_buffer = text_buffer * size
-                                    binary_buffer = binary_buffer * size
-                                else:
-                                    buffer = write_f.read(length)
-                                    index_byte = np.arange(0, length, bs)
-                                    text_buffer = bytearray(
-                                        size * FLIT_TEXT_LENGTH
-                                    )
-                                    text_offset = np.arange(
-                                        0,
-                                        size * FLIT_TEXT_LENGTH,
-                                        FLIT_TEXT_LENGTH,
-                                    )
-                                    binary_buffer = bytearray(
-                                        size * FLIT_BINARY_LENGTH
-                                    )
-                                    binary_offset = np.arange(
-                                        0,
-                                        size * FLIT_BINARY_LENGTH,
-                                        FLIT_BINARY_LENGTH,
-                                    )
-
-                                    def convert(
-                                        x,
-                                        y,
-                                        address,
-                                        index_byte,
-                                        text_offset,
-                                        binary_offset,
-                                    ):
-                                        buffer_value = buffer[
-                                            index_byte : index_byte + bs
-                                        ] + b"\x00" * (8 - bs)
-                                        value = struct.unpack("<Q", buffer_value)[0]
-                                        gen_flit_parallel(
-                                            x,
-                                            y,
-                                            address,
-                                            value,
-                                            text_buffer,
-                                            text_offset,
-                                            binary_buffer,
-                                            binary_offset,
-                                            config_list=config_list,
-                                        )
-
-                                    np.frompyfunc(convert, 6, 0)(
-                                        x,
-                                        y,
-                                        address,
-                                        index_byte,
-                                        text_offset,
-                                        binary_offset,
-                                    )
-                                fin.write(text_buffer)
-                                fbin.write(binary_buffer)
-                elif (
-                    item[1] == "write"
-                    or item[1] == "write_ram"
-                    or item[1] == "read_ack"
-                    or item[1] == "write_risc"
-                    or item[1] == "read_risc_ack"
-                ) and os.path.exists(tc / item[5]):
-                    if item[1] == "write_ram":
-                        item[1] = "write"
-                    tmp = item
-                    x, y = int(item[2]), int(item[3])
-                    addr = item[4]
-                    while isinstance(addr, str):
-                        addr = int(addr,16)
-                        # addr = eval(addr)
-                    with open(tc / item[5], "r") as write_f:
-                        wlines = write_f.readlines()
-                        wlength = len(wlines)
-                        address = np.arange(addr, addr + wlength)
-                        text_buffer = bytearray(
-                            wlength * FLIT_TEXT_LENGTH
-                        )
-                        text_offset = np.arange(
-                            0,
-                            wlength * FLIT_TEXT_LENGTH,
-                            FLIT_TEXT_LENGTH,
-                        )
-                        binary_buffer = bytearray(
-                            wlength * FLIT_BINARY_LENGTH
-                        )
-                        binary_offset = np.arange(
-                            0,
-                            wlength * FLIT_BINARY_LENGTH,
-                            FLIT_BINARY_LENGTH,
-                        )
-
-                        def convert(x, y, address, line, text_offset, binary_offset):
-                            return gen_flit_parallel(
-                                x,
-                                y,
-                                address,
-                                int(line, 16),
-                                text_buffer,
-                                text_offset,
-                                binary_buffer,
-                                binary_offset,
-                                config_list=config_list,
-                            )
-
-                        np.frompyfunc(convert, 6, 0)(
-                            x, y, address, wlines, text_offset, binary_offset
-                        )
-                        fin.write(text_buffer)
-                        fbin.write(binary_buffer)
-                else:
-                    gen_flit(
-                        item,
-                        fin,
-                        fbin,
-                        direct,
-                        x_from=-1,
-                        y_from=-1,
-                        config_list=config_list,
-                    )
-        load_f.close()
-
-    def __gen_flit_by_fn_east__(self, fn, fin, fbin, direct=0, tc="", **config_list):
-        """
-        这个函数gen_flit_by_fn负责根据输入文件（通常是.dwnc文件）生成FLIT数据包，
-        并将这些数据包写入到文本和二进制文件中。
-        FLIT数据包是一种用于神经网络中数据传输的格式，
-        它包含了操作类型、目标地址、数据值和其他控制信息。
-        函数首先检查输入文件是否存在，如果不存在则直接返回。
-        然后，它打开文件并读取所有行，遍历每一行来处理不同的操作。
-        对于读操作，它可能需要从其他文件中读取数据并生成对应的FLIT数据包。
-        对于写操作，它需要将数据写入FLIT数据包中。
-        最后，它使用gen_flit函数生成FLIT数据包，并将这些数据包写入到文本和二进制文件中。
-        这个函数通过递归调用自己来处理包含的文件，
-        这允许它处理复杂的.dwnc文件，这些文件可能包含对其他文件的引用。
-        """
-        # print("===========================")
-        # print("into gen_flit_by_fn")
-        # print("file: " + fn)
-        # print("config list before:")
-        # print(config_list)
-        tc = self.config_path
-        while config_list.get("config_list") != None:
-            config_list = config_list["config_list"]
-        # print("config list after:")
-        # print(config_list)
-        if not os.path.exists(fn):
-            return
-        with open(fn, "r", encoding="utf-8") as load_f:
-            # print("config list[2]:")
-            # print(config_list)
-            lines = load_f.readlines()
-            for items in lines:
-                # print("line: ")
-                # print(items)
-                # print("config list[3]:")
-                # print(config_list)
-                item = items.split()
-                if len(item) < 2:
-                    continue
-                if "#" in item[0]:
-                    continue
-                if item[0] == "<<":
-                    self.__gen_flit_by_fn_east__(
-                        self.config_path + item[1],
-                        fin,
-                        fbin,
-                        direct,
-                        tc,
-                        config_list=config_list,
-                    )
-                elif item[1] == "read" and len(item) >= 6:
-                    tmp = item
-                    # addr = eval(eval(item[4]))
-                    addr = int(item[4],16)
-                    while isinstance(item[5], str):
-                        item[5] = int(item[5],16)
-                    #     item[5] = eval(item[5])
-                    for i in range(int(item[5])):
-                        tmp[4] = '"%s"' % hex(addr + i)
-                        gen_flit_east(
-                            tmp,
-                            fin,
-                            fbin,
-                            direct,
-                            x_from=24,
-                            y_from=-1,
-                            config_list=config_list,
-                        )
-                elif (
-                    item[1] == "write"
-                    or items[1] == "write_ram"
-                    or item[1] == "read_ack"
-                    or item[1] == "write_risc"
-                    or item[1] == "read_risc_ack"
-                ) and len(item) == 5:
-                    if item[1] == "write_ram":
-                        item[1] = "write"
-                    tmp = item
-                    tmp.append("")
-                    if os.path.exists(tc + item[4]):
-                        with open(tc + item[4], "rb") as write_f:
-                            tot = int.from_bytes(
-                                write_f.read(4), byteorder="little", signed=False
-                            )
-                            for segment in range(tot):
-                                area_id = int(write_f.read(1)[0])
-                                t = area_id & 0xF
-                                config_word_equal = (t & 0x80) != 0
-                                addr = int.from_bytes(
-                                    write_f.read(4), byteorder="little", signed=False
-                                )
-                                length = int.from_bytes(
-                                    write_f.read(4), byteorder="little", signed=False
-                                )
-                                bo = "little"
-                                bs = 4
-                                di = 1
-                                # Dedr
-                                if t == 0x01:
-                                    addr += 0x10000
-                                    bs = 6
-                                # Wgtsum
-                                if t == 0x02:
-                                    addr += 0x4000
-                                    bs = 2
-                                # Inference State
-                                if t == 0x03:
-                                    addr += 0x10000
-                                    bs = 6
-                                    di = -1
-                                # Voltage
-                                if t == 0x04:
-                                    addr += 0x2000
-                                    bs = 2
-                                # Axon
-                                if t == 0x05:
-                                    addr += 0x8000
-                                    bs = 4
-                                # Learn State
-                                if t == 0x06:
-                                    addr += 0x10000
-                                    bs = 6
-                                    di = -1
-                                # Inst
-                                if t == 0x07:
-                                    addr += 0x1000
-                                    bs = 2
-                                # Reg
-                                if t == 0x08:
-                                    addr += 0x800
-                                    bs = 2
-                                size = length if config_word_equal else int(length / bs)
-                                x, y = int(item[2]), int(item[3])
-                                address = np.arange(addr, addr + size * di, di)
-                                if config_word_equal:
-                                    value = struct.unpack_from(
-                                        "<Q", write_f.read(bs) + b"\x00" * (8 - bs)
-                                    )[0]
-                                    text_buffer = bytes(FLIT_TEXT_LENGTH)
-                                    binary_buffer = bytes(
-                                        FLIT_BINARY_LENGTH
-                                    )
-                                    gen_flit_parallel_east(
-                                        x,
-                                        y,
-                                        address,
-                                        value,
-                                        text_buffer,
-                                        0,
-                                        binary_buffer,
-                                        0,
-                                        config_list=config_list,
-                                    )
-                                    text_buffer = text_buffer * size
-                                    binary_buffer = binary_buffer * size
-                                else:
-                                    buffer = write_f.read(length)
-                                    index_byte = np.arange(0, length, bs)
-                                    text_buffer = bytearray(
-                                        size * FLIT_TEXT_LENGTH
-                                    )
-                                    text_offset = np.arange(
-                                        0,
-                                        size * FLIT_TEXT_LENGTH,
-                                        FLIT_TEXT_LENGTH,
-                                    )
-                                    binary_buffer = bytearray(
-                                        size * FLIT_BINARY_LENGTH
-                                    )
-                                    binary_offset = np.arange(
-                                        0,
-                                        size * FLIT_BINARY_LENGTH,
-                                        FLIT_BINARY_LENGTH,
-                                    )
-
-                                    def convert(
-                                        x,
-                                        y,
-                                        address,
-                                        index_byte,
-                                        text_offset,
-                                        binary_offset,
-                                    ):
-                                        buffer_value = buffer[
-                                            index_byte : index_byte + bs
-                                        ] + b"\x00" * (8 - bs)
-                                        value = struct.unpack("<Q", buffer_value)[0]
-                                        gen_flit_parallel_east(
-                                            x,
-                                            y,
-                                            address,
-                                            value,
-                                            text_buffer,
-                                            text_offset,
-                                            binary_buffer,
-                                            binary_offset,
-                                            config_list=config_list,
-                                        )
-
-                                    np.frompyfunc(convert, 6, 0)(
-                                        x,
-                                        y,
-                                        address,
-                                        index_byte,
-                                        text_offset,
-                                        binary_offset,
-                                    )
-                                fin.write(text_buffer)
-                                fbin.write(binary_buffer)
-                elif (
-                    item[1] == "write"
-                    or item[1] == "write_ram"
-                    or item[1] == "read_ack"
-                    or item[1] == "write_risc"
-                    or item[1] == "read_risc_ack"
-                ) and os.path.exists(tc + item[5]):
-                    if item[1] == "write_ram":
-                        item[1] = "write"
-                    tmp = item
-                    x, y = int(item[2]), int(item[3])
-                    addr = item[4]
-                    while isinstance(addr, str):
-                        # addr = eval(addr)
-                        addr = int(addr,16)
-                    with open(tc + item[5], "r") as write_f:
-                        wlines = write_f.readlines()
-                        wlength = len(wlines)
-                        address = np.arange(addr, addr + wlength)
-                        text_buffer = bytearray(
-                            wlength * FLIT_TEXT_LENGTH
-                        )
-                        text_offset = np.arange(
-                            0,
-                            wlength * FLIT_TEXT_LENGTH,
-                            FLIT_TEXT_LENGTH,
-                        )
-                        binary_buffer = bytearray(
-                            wlength * FLIT_BINARY_LENGTH
-                        )
-                        binary_offset = np.arange(
-                            0,
-                            wlength * FLIT_BINARY_LENGTH,
-                            FLIT_BINARY_LENGTH,
-                        )
-
-                        def convert(x, y, address, line, text_offset, binary_offset):
-                            return gen_flit_parallel_east(
-                                x,
-                                y,
-                                address,
-                                int(line, 16),
-                                text_buffer,
-                                text_offset,
-                                binary_buffer,
-                                binary_offset,
-                                config_list=config_list,
-                            )
-
-                        np.frompyfunc(convert, 6, 0)(
-                            x, y, address, wlines, text_offset, binary_offset
-                        )
-                        fin.write(text_buffer)
-                        fbin.write(binary_buffer)
-                else:
-                    gen_flit_east(
-                        item,
-                        fin,
-                        fbin,
-                        direct,
-                        x_from=24,
-                        y_from=-1,
-                        config_list=config_list,
-                    )
-        load_f.close()
-
-    def __flit_gen__(self, type="", input_file="", output_file="", update=True):
-        config_list = {
-            "last_vc": 1,
-            "tick": 0,
-            "start_tick": -1,
-            "stop_tick": -1,
-            "clear_tick": -1,
-            "pkg_num": 0,
-        }
-        if self.log_debug:
-            logging.info("generating %s.txt&%s.bin"%(output_file,output_file))
-        start_time = time.time()
-        file_path = ""
-        if type == "deploy":
-            file_path = self.deploy_path
-        elif type == "input":
-            file_path = self.input_path
-        elif type == "debug":
-            file_path = self.debug_path
-        else:
-            print("type not supported!")
-            return
-        if not os.path.exists(file_path / input_file):
-            print("file not found!")
-            return
-
-        fin = open(file_path / (output_file + ".txt"), "wb")
-        fin_bin = open(file_path / (output_file + ".bin"), "wb")
-        config_list["tick"] = 0
-        self.__gen_flit_by_fn__(
-            file_path / input_file, fin, fin_bin, 0, file_path, config_list=config_list
-        )
-        fin.close()
-        fin_bin.close()
-        end_time = time.time()
-        if self.log_debug:
-            logging.debug("======%s flit_gen elapsed : %.4f ms" % (output_file,(end_time - start_time)*1000))
-
-    def __flit_gen_east__(self, type="", input_file="", output_file="", update=True):
-        config_list = {
-            "last_vc": 1,
-            "tick": 0,
-            "start_tick": -1,
-            "stop_tick": -1,
-            "clear_tick": -1,
-            "pkg_num": 0,
-        }
-        start_time = time.time()
-        print("===<0>=== generating %s.txt & %s.bin" % (output_file, output_file))
-        file_path = ""
-        if type == "deploy":
-            file_path = self.deploy_path
-        elif type == "input":
-            file_path = self.input_path
-        else:
-            print("type not supported!")
-            return
-        if not os.path.exists(file_path + input_file):
-            print("file not found!")
-            return
-
-        fin = open(file_path + output_file + ".txt", "wb")
-        fin_bin = open(file_path + output_file + ".bin", "wb")
-        config_list["tick"] = 0
-        self.__gen_flit_by_fn_east__(
-            file_path + input_file, fin, fin_bin, 0, file_path, config_list=config_list
-        )
-        fin.close()
-        fin_bin.close()
-        end_time = time.time()
-        print(
-            "===<0>=== flit_gen elapsed : %.4f ms" % ((end_time - start_time))
-        )
-
-    def __gen_deploy_input_dwnc__(
-        self,
-        deploy_input_dwnc_file="deploy_input",
-    ):
-        """
-        *-*-config.dwnc => deploy_input.dwnc
-        Args:
-            deploy_input_dwnc_file (str): 生成的 dwnc 文件的名称
-        Returns:
-            None
-        """
-        
-        # 打开东西向传输的文件
-        with open(self.deploy_path / (deploy_input_dwnc_file + ".dwnc"), "w+") as fwest, \
-             open(self.deploy_path / (deploy_input_dwnc_file + "_east.dwnc"), "w+") as feast:
-            
-            # 清除神经元推理状态和权重和
-            for neuron in self.config_neuron_list:
-                if int(neuron[0]) <= 15:
-                    fwest.write(f"0 write {neuron[0]} {neuron[1]} 0x04 0x5\n")
-                else:
-                    self.deploy_from_east = True
-                    feast.write(f"0 write {neuron[0]} {neuron[1]} 0x04 0x5\n")
-            
-            # 将每个神经元的 config 文件整合到整体的 config 文件中
-            search_paths = Path.glob(self.config_path, self.config_file_format)
-            for search_path in search_paths:
-                file = search_path.name
-                x = re.findall(r"\d+", file)[0]
-                if int(x) <= 15:
-                    fwest.write(f"<< {file}\n")
-                else:
-                    self.deploy_from_east = True
-                    feast.write(f"<< {file}\n")
-
-            # 加入开启/停止tik控制对 => 代表配置结束
-            fwest.write('0 cmd 0xc0000001\n')
-            fwest.write('0 cmd 0xc0000000\n')
-            feast.write('0 cmd 0xc0000001\n')
-            feast.write('0 cmd 0xc0000000\n')
-
-            # 设置tick
-            fwest.write('0 cmd 0xe{:0>7x}\n'.format(self.hardware_step_size))
-            feast.write('0 cmd 0xe{:0>7x}\n'.format(self.hardware_step_size))
-
-            # 使能神经元，清除神经元权重和
-            for neuron in self.config_neuron_list:
-                if int(neuron[0]) <= 15:
-                    fwest.write(f"0 write {neuron[0]} {neuron[1]} 0x15 0x1\n")
-                    fwest.write(f"0 write {neuron[0]} {neuron[1]} 0x04 0x1\n")
-                else:
-                    self.deploy_from_east = True
-                    feast.write(f"0 write {neuron[0]} {neuron[1]} 0x15 0x1\n")
-                    feast.write(f"0 write {neuron[0]} {neuron[1]} 0x04 0x1\n")
-        
-        # 若不需要从东边配置，则删除空白文件
-        if self.deploy_from_east == False:
-            os.remove(self.deploy_path / (deploy_input_dwnc_file + "_east.dwnc"))
-        return
-
-    def __gen_deploy_flitin__(
-        self,
-        deploy_input_dwnc_file="deploy_input",
-        deploy_flitin_file="deploy_flitin",
-    ):
-        """
-        deploy_input.dwnc => deploy_flitin.txt && deploy_flitin.bin
-        Args:
-            deploy_input_dwnc_file (str): 部署使用的 dwnc 文件名称
-            deploy_flitin_file (str): 生成的部署使用的 flit 文件名称
-        Returns:
-            None
-        """
-        self.__flit_gen__(
-            type="deploy",
-            input_file=deploy_input_dwnc_file+".dwnc",
-            output_file=deploy_flitin_file,
-        )
-        if self.deploy_from_east:
-            self.__flit_gen_east__(
-                type="deploy",
-                input_file=deploy_input_dwnc_file+"_east.dwnc",
-                output_file=deploy_flitin_file+"_east"
-            )
-        return
-
-    def __gen_run_flitin__(
-        self, run_input_dwnc_file="run_input.dwnc", run_flitin_file="run_flitin"
-    ):
-        """
-        run_input.dwnc => run_flitin.txt && run_flitin.bin
-        Args:
-            run_input_dwnc_file (str): 输入的运行 dwnc 文件
-            run_flitin_file (str): 生成的运行 flit 文件
-        Returns:
-            None
-        """
-        self.__flit_gen__(
-            type="input",
-            input_file=run_input_dwnc_file,
-            output_file=run_flitin_file,
-        )
-        return
-
-    def __transmit_flit__(self, port, data_type, freq=333, fbin="", recv=False, recv_run_flit_file="recv_run_flit", debug=False):
-        """
-        发包到darwin3, recv=True时接收darwin3返回来的包
-        Args:
-            port (list(int)): TCP 连接端口列表
-            data_type (int): 发送包的格式
-            freq (int): 设置的时钟频率 (仅当 data_type==SET_FREQUENCY 时有效)
-            fbin (str): 发送的包内容 (仅当 data_type==NORMAL_FLIT 时有效)
-            recv (bool): 是否接受 Darwin3 的返回包
-            recv_run_flit_file (str): 保存返回包的名称
-            debug (bool): 调试标记
-        Returns:
-            None
-        """
-        trans = Transmitter()
-        ip_address = (self.ip, port)
-        trans.connect_lwip(ip_address)
-        if self.log_debug:
-            logging.info("tcp connect succeed")
-        start_time = time.time()
-        if data_type == darwin3_device.CHIP_RESET:
-            send_bytes = bytearray()
-            send_bytes += struct.pack('I', 0x0000)
-            send_bytes += struct.pack('I', data_type)
-            trans.socket_inst.sendall(send_bytes)
-            if self.log_debug:
-                logging.info("reset packet sent")
-        elif data_type == darwin3_device.SET_FREQUENCY:
-            send_bytes = bytearray()
-            send_bytes += struct.pack('I', freq)
-            send_bytes += struct.pack('I', data_type)
-            trans.socket_inst.sendall(send_bytes)
-            if self.log_debug:
-                logging.info("set frequency packet sent")
-        else:
-            trans.send_flit_bin(fbin, data_type)
-            if self.log_debug:
-                logging.info("flit data packet sent")
-        end_time = time.time()
-        if self.log_debug:
-            logging.debug('====== tcp sent elapsed : %.4f ms' % ((end_time - start_time)*1000))
-        if recv:
-            self.__recv_flit__(trans,recv_run_flit_file,debug)
-            end_time = time.time()
-            if self.log_debug:
-                logging.debug('====== tcp recv elapsed : %.4f ms' % ((end_time - start_time)*1000))
-        trans.close()
-        return
-
-    def __recv_flit__(self, trans, recv_run_flit_file="recv_run_flit", debug=False):
-        """
-        接收从darwin3来的包
-        Args:
-            trans (Transmitter): Transmitter
-            recv_run_flit_file (str): 保存返回包的名称
-            debug (bool): 调试标记
-        Returns:
-            None
-        """
-        if debug:
-            file_path = self.debug_path
-        else:
-            file_path = self.output_path
-        fout = open(file_path / (recv_run_flit_file+".txt"), "wb")
-        foutbin = open(file_path / (recv_run_flit_file+".bin"), "wb")
-        hl = b""
-        index = 0
-        tot = 0
-        while True:
-            request = trans.socket_inst.recv(8192)
-            if len(request) <= 0:
-                break
-            foutbin.write(request)
-            for i in range(len(request)):
-                b = b"%02x" % request[i]
-                hl = b + hl
-                index = index + 1
-                if (index == 4):
-                    fout.write (hl + b"\n")
-                    # print(hl)
-                    hl = b""
-                    index = 0
-                    tot = tot + 1
-        fout.close()
-        foutbin.close()
-        return
-
-    def __run_parser__(self, recv_run_flit_file='recv_run_flit', result=[[],], debug=False, pop_name=''):
-        """
-        解析 Darwin3 返回的包
-        Args:
-            recv_run_flit_file (str): 返回包的名称
-            result (list(list)): 解析结果
-            debug (bool): 调试标记
-            pop_name (str): 输出的文件名
-        Returns:
-            None
-        """
-        if self.log_debug:
-            logging.info('parsering recv flit : %s.txt' % recv_run_flit_file)
-        if debug:
-            file_path = self.debug_path
-        else:
-            file_path = self.output_path
-        start_time = time.time()
-        with open(file_path / (recv_run_flit_file+'.txt'), 'r') as flit_f :
-            lines = flit_f.readlines()
-            index = 0
-            is_write = 0
-            is_spike = 0
-            is_reward = 0
-            is_flow = 0
-            is_dedr = 0
-            t = 0
-
-            # if debug:
-                # fanalyse = open(file_path+recv_run_flit_file+'_'+pop_name+'_analyse.txt','w')
-            for items in lines:
-                _flit_type=int(items[0],16)>>2&0x3    
-                if _flit_type == 3:  #flit_type=3 
-                    cmd = int(items[0:2], 16)&0x3f    #[31:26]
-                    if cmd == 0b011000:     # d8000000
-                        arg = int(items[2:8],16)
-                        t+=arg+1
-                elif _flit_type == 2 :    #flit_type=2 包头
-                    index = 0
-                    _pak_class = int(items[1:3],16)>>2
-                    is_write = _pak_class & 0x7 == 1    #[24:22]
-                    is_spike = _pak_class & 0x7 in (0,4,5,6)
-                    is_reward= _pak_class & 0x7 in (5,6)
-                    is_flow  = _pak_class & 0x7 == 7
-                    _dst = int(items[3:5],16)
-                    dst_x = (_dst>>2) & 0xf    #[17:14]
-                    if (_dst>>6) & 0x1 == 1:     #[18]
-                        dst_x = -dst_x
-                    y = (int(items[0:2],16)>>1)&0x1f     #[29:25]
-                    x = ((int(items[5:7],16)>>1)&0xf) + dst_x - 1    #[8:5]
-                elif (is_write == 1) :
-                    if _flit_type == 1 :
-                        value = (value<<24) + ((int(items[0:8],16)>>3)&0x7ffffff)
-                        addr_eff = addr & 0x1ffff
-                        addr_relay = (addr >> 18) & 0x3f
-                        if self.log_debug:
-                            if (is_dedr):
-                                logging.info("[dedr] tik=%d, x=%d, y=%d, relay_link=0x%02x, addr=0x%05x, value=0x%012x " % (t,x,y,addr_relay,addr_eff,value))
-                            else:
-                                if addr_eff >= 0x8000:
-                                    c = "axon"
-                                elif addr_eff >= 0x4000:
-                                    c = "wgtsum"
-                                elif addr_eff >= 0x2000:
-                                    c = "vt"
-                                elif addr_eff >= 0x1000:
-                                    c = "inst"
-                                elif addr_eff >= 0x800:
-                                    c = "reg"
-                                else:
-                                    c = "conf"
-                                v = value & 0xffff
-                                if v >= 0x8000 and addr_eff >= 0x800 and addr_eff < 0x8000:
-                                    v = v - 0x10000        
-                                logging.info("[%s] tik=%d, x=%d, y=%d, relay_link=0x%02x, addr=0x%05x, value=0x%08x (%d)" % (c,t,x,y,addr_relay,addr_eff,value,v))
-                                addr_eff = f"{addr_eff:05x}"
-                                value = f"{value:08x}"
-                            # if debug:
-                                # fanalyse.write('\"0x'+addr_eff+'\" \"0x'+value+'\"'+' '+str(v)+'\n')
-                        is_write = 0
-                    elif _flit_type == 0 :
-                        if (index == 0):
-                            addr = (int(items[0:8],16)>>3)&0x7ffffff
-                            index = index + 1
-                            if ((addr & 0x1ffff) >= 0x10000):
-                                is_dedr = 1
-                        else :
-                            value = (int(items[0:8],16)>>3)&0x7ffffff
-                elif (is_spike == 1) :
-                    if _flit_type == 1 :      #flit_type=1 包尾
-                        neu_idx = (int(items[4:8],16) >> 3) & 0xfff  #[29:15]
-                        dedr_id = (int(items[0:5],16) >> 3) & 0x7fff  #[14:3]
-
-                        # format = "output_neuron*.json"
-                        # pattern = re.compile(r'output_neuron_(.*?)\.json')
-                        # search_paths = glob.glob(self.neuron_path+format)
-                        index = f"{x}, {y}, {dedr_id}"
-                        for output_name,output_neuron_info in self._output_neuron_info_jsons:
-                            # if output_neuron_info.get(index) is not None:
-                            if index in output_neuron_info:
-                                result[t-1].append((output_name,output_neuron_info[index]))
-                        if self.log_debug:
-                            if is_reward:
-                                if self.printc:
-                                    logging.info("[rwd] tik=%d, x=%d, y=%d, dedr_id=0x%04x, wgt=0x%02x" % (t,x,y,dedr_id,neu_idx))
-                            else:   
-                                if self.printc:
-                                    logging.info("[spk] tik=%d, x=%d, y=%d, dedr_id=0x%04x, neu_idx=0x%03x" % (t,x,y,dedr_id,neu_idx))
-                        is_spike = 0
-                        is_reward = 0
-                elif (is_flow == 1) :
-                    if _flit_type == 1 :
-                        addr_relay = (addr >> 18) & 0x3f
-                        data = data + ((int(items[0:8],16)&0x3fffffff)<<24)
-                        data = (data << 17) + (addr & 0x1ffff)
-                        if self.log_debug:
-                            if self.printc:
-                                logging.info("[flow] tik=%d, x=%d, y=%d, relay_link=0x%02x, data=0x%018x" % (t,x,y,addr_relay,data))
-                        is_flow = 0
-                    elif _flit_type == 0 :
-                        if (index == 0):
-                            addr = (int(items[9:16],16)>>3)&0x7ffffff
-                            index = index + 1
-                        else :
-                            data = (int(items[0:8],16)>>3)&0x7ffffff
-            # if debug:
-                # fanalyse.close()
-        flit_f.close()
-        end_time = time.time()
-        if self.log_debug:
-            logging.debug('====== parser recv flit:%s.txt elapsed : %.4f ms' % (recv_run_flit_file,(end_time - start_time)*1000))
-        return
-
-    def deploy_config(self):
-        """
-        在部署芯片上部署并使能相关核心, 同时清除神经元的相关状态
-        Args:
-            None
-        Returns:
-            None
-        """
-        if not self.deploy_config_had_started:
-            self.__gen_deploy_input_dwnc__()
-            self.__gen_deploy_flitin__()
-            self.deploy_config_had_started = True
-        self.__transmit_flit__(port=self.port[0], data_type=self.NORMAL_FLIT, fbin=self.deploy_path / "deploy_flitin.bin")
-        if self.deploy_from_east == True:
-            self.__transmit_flit__(port=self.port[1], data_type=self.NORMAL_FLIT, fbin=self.deploy_path / "deploy_flitin_east.bin")
-        return
-    
-    def get_neuron_state(self, pop_name: str, state: list, offset=0):
-        """
-        从硬件获取神经元的状态，状态空间包括膜电位、权重和、推理参数、推理状态等，主要用于调试。
-        Args:
-            pop_name (str): 编译阶段的 Population Name
-            state (list): sequence[array]，包含一组或多组[神经元序号, [状态空间列表]]
-                   膜电位(vt) => "read", x, y, neuron_index+0x02000  按升序
-                   权重和(wgtsum) => "read", x, y, neuron_index+0x04000  按升序
-                   推理参数(inference_parameter) => "read", x, y, neuron_index+0x1E000(按升序)  0x1EFFF-neuron_index(按降序)
-                   推理状态(inference_status) => "read", x, y, neuron_index+0x1F000(按升序)  0x1FFFF-neuron_index(按降序)
-            offset (int): 用户指定的地址偏移
-        Returns:
-            None
-        """
-        if not self.log_debug:
-            logging.basicConfig(level=logging.DEBUG,  # 设置最低日志级别为 DEBUG
-                    format='%(asctime)s - %(levelname)s - %(message)s',  # 日志格式
-                    filename='app.log',  # 将日志输出到文件 app.log
-                    filemode='w')  # 'a'表示追加模式，'w'表示覆盖模式
-        self.log_debug = True
-        debug_from_east = False
-        debug_from_west = False
-        with open(self.neuron_path + pop_name +".json", "r") as f:
-            hidden_info = json.load(f)
-
-        with open(self.debug_path / 'get_neuron_state_input.dwnc', 'w') as fwest,\
-            open(self.debug_path / 'get_neuron_state_input_east.dwnc', 'w') as feast:
-            fwest.write('0 cmd 0xc0000001\n')
-            feast.write('0 cmd 0xc0000001\n')
-            for neu_idx, state_space in state:
-                targetlist = hidden_info[str(neu_idx)]
-                x = targetlist[0]
-                y = targetlist[1]
-                neu_offset = targetlist[2]
-                for name in state_space:
-                    if name == 'vt':
-                        item = f"0 read {x} {y} {hex(neu_offset+0x02000)} 1\n"
-                    elif name == 'wgtsum0':
-                        item = f"0 read {x} {y} {hex(neu_offset+0x04000)} 1\n"
-                    elif name == 'wgtsum1':
-                        item = f"0 read {x} {y} {hex(neu_offset+0x05000)} 1\n"
-                    elif name == 'inference_parameter':
-                        item = f"0 read {x} {y} {hex(0x1EFFF-neu_offset)} 1\n"
-                    elif name == 'inference_status':
-                        item = f"0 read {x} {y} {hex(0x1FFFF-neu_offset)} 1\n"
-                    elif name == 'npu_reg':
-                        item = f"0 read {x} {y} {hex(0x00800 + offset)} 1\n"
-                    elif name == 'config_reg':
-                        item = f"0 read {x} {y} {hex(0x00000 + offset)} 1\n"
-                    else:
-                        print('error! not allowed %s', name)
-                    if x>=15:
-                        feast.write(item)
-                        debug_from_east = True
-                    else:
-                        fwest.write(item)
-                        debug_from_west = True
-            fwest.write('0 cmd 0xc0000000\n')
-            feast.write('0 cmd 0xc0000000\n')
-        if debug_from_east == False:
-            os.remove(self.debug_path / 'get_neuron_state_input_east.dwnc')
-        else:
-            self.__flit_gen_east__(type="debug", input_file='get_neuron_state_input_east.dwnc', output_file='get_neuron_state_flitin_east')
-            self.__transmit_flit__(port=self.port[1], data_type=0x8000, fbin=self.debug_path+'get_neuron_state_flitin_east.bin', recv=True, recv_run_flit_file="get_neuron_state_recv_east",debug=True)
-            self.__run_parser__(recv_run_flit_file='get_neuron_state_recv_east', debug=True, pop_name=pop_name)
-
-        if debug_from_west == False:
-            os.remove(self.debug_path / 'get_neuron_state_input.dwnc')
-        else:
-            self.__flit_gen__(type="debug", input_file='get_neuron_state_input.dwnc', output_file='get_neuron_state_flitin')
-            self.__transmit_flit__(port=self.port[0], data_type=self.NORMAL_FLIT, fbin=self.debug_path+"get_neuron_state_flitin.bin", recv=True, recv_run_flit_file="get_neuron_state_recv",debug=True)
-            self.__run_parser__(recv_run_flit_file='get_neuron_state_recv', debug=True, pop_name=pop_name)
-        
-        debug_from_west == False
-        debug_from_east == False
-        self.log_debug = False
-
-        return
 
     def enable_neurons(self, dwnc_file="enable"):
         """
@@ -1242,7 +197,7 @@ class darwin3_device(object):
         Returns:
             None
         """
-        
+        raise NotImplementedError
         # 生成 dwnc 文件
         with open(self.deploy_path / (dwnc_file + ".dwnc"), "w+") as fwest, \
         open(self.deploy_path / (dwnc_file + "_east.dwnc"), "w+") as feast:
@@ -1286,7 +241,7 @@ class darwin3_device(object):
         Returns:
             None
         """
-        
+        raise NotImplementedError
         # 生成 dwnc 文件
         with open(self.deploy_path / (dwnc_file + ".dwnc"), "w+") as fwest, \
         open(self.deploy_path / (dwnc_file + "_east.dwnc"), "w+") as feast:
@@ -1338,7 +293,7 @@ class darwin3_device(object):
         Returns:
             None
         """
-        
+        raise NotImplementedError
         # 根据需要重置的内容生成指令
         if not self.clear_sate_had_started:
             clear_type = hex(int(''.join(str(int(b)) for b in [ISC, LSC, clear]), 2))
@@ -1396,6 +351,52 @@ class darwin3_device(object):
         return
     
     # new part
+    def _gen_deploy_flitin(self):
+        """
+        *-*-config.dwnc => deploy_input.dwnc
+        Args:
+            deploy_input_dwnc_file (str): 生成的 dwnc 文件的名称
+        Returns:
+            None
+        """
+        # 打开东西向传输的文件
+        west_dwnc_list=[]
+        east_dwnc_list=[]
+
+        deploy_from_east_flag = False
+        # 清除神经元推理状态和权重和
+        for neuron in self.config_neuron_list:
+            if int(neuron[0]) <= 15:
+                west_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x04,0x5))
+            else:
+                deploy_from_east_flag = True
+                east_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x04,0x5))
+        
+        fw,fe=parse_compiler_config(self.config_path)
+        west_dwnc_list.extend(fw)
+        east_dwnc_list.extend(fe)
+
+        # 加入开启/停止tik控制对 => 代表配置结束
+        west_dwnc_list.append((PKG_CMD,0,1))
+        west_dwnc_list.append((PKG_CMD,0,1))
+        east_dwnc_list.append((PKG_CMD,0,1))
+        east_dwnc_list.append((PKG_CMD,0,1))
+
+        # 设置tick
+        west_dwnc_list.append((PKG_CMD,0b100000,self.hardware_step_size))
+        east_dwnc_list.append((PKG_CMD,0b100000,self.hardware_step_size))
+
+        # 使能神经元，清除神经元权重和
+        for neuron in self.config_neuron_list:
+            if int(neuron[0]) <= 15:
+                west_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x15,0x1))
+                west_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x04,0x1))
+            else:
+                east_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x15,0x1))
+                east_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x04,0x1))
+    
+        return west_dwnc_list,east_dwnc_list,deploy_from_east_flag
+
     def reset(self):
         """
         复位硬件接口相关逻辑和硬件系统(darwin3 芯片, DMA 等)
@@ -1485,9 +486,9 @@ class darwin3_device(object):
         Returns:
             dwnc list
         """
-        dwnc_list=[(0,DWNC.COMMAND.CMD, 0xc0000001)]
+        dwnc_list=[(PKG_CMD,0,1)] # open time step
         for _i in range(0, len(neuron_spike_list)):
-            _time_step = _i + 1
+            dwnc_list.append((PKG_CMD,0b011000,0)) # step 1
             cur_spike_neuron_list = neuron_spike_list[_i]
             for spike_neuron in cur_spike_neuron_list:
                 neuron_info = self.input_neuron[str(spike_neuron)]
@@ -1502,33 +503,48 @@ class darwin3_device(object):
                         x = target[0]
                         y = target[1]
                         derd_id = target[2]
-                        dwnc_list.append((_time_step,DWNC.COMMAND.SPIKE,x,y,derd_id,neu_idx))
-                        # cur_line = f"{_time_step} spike {x} {y} {derd_id} {neu_idx}"
-                        # cur_line = str(_time_step) + " spike " + str(x) + " " + str(y) + " \"" + derd_id + "\""+" \""+ neu_idx +"\"\n"
-                        # dwnc_list.append(cur_line)
+                        dwnc_list.append((PKG_SPIKE,x,y,neu_idx,derd_id))
 
-        steps = len(neuron_spike_list)
-        dwnc_list.append((steps,DWNC.COMMAND.CMD, 0xc0000000))
+        dwnc_list.append((PKG_CMD,0,0)) # turn off
 
         return dwnc_list
 
-    def _excute_dwnc_command_west(self,dwnc_list,saving_dir:Path,saving_name,saving_input_flit=True,saving_recv=True,parser_log=True):
-        bin_io_rslt=gen_flit_by_dwnc_mem_west(Path(self.app_path)/'output_files',dwnc_list)
-        if saving_input_flit:
-            raise NotImplementedError
-        #     (saving_dir / (saving_name + '.txt')).write_bytes(text_io_rslt.getvalue())
-            # (saving_dir / (saving_name + '.bin')).write_bytes(bin_io_rslt.getvalue())
-
+    def _excute_dwnc_command(self,dwnc_list,direction,saving_name='',recv=True,saving_recv=True) -> list[ResultBase]:
+        bin_io_rslt=encode(dwnc_list,direction)
         # send
         rslt = self._transmit_flit(port=self.port[0], 
                             data_type=self.NORMAL_FLIT,
                             flit_bin=bin_io_rslt.getvalue(),
-                            recv=True,
-                            recv_run_flit_file=None if not saving_recv else saving_dir / f"recv_{saving_name}.txt")
-        
-        # rslt = parse_flit_bin(rslt.getvalue())
+                            recv=recv,
+                            recv_run_flit_file=None if not saving_recv else self._cache_path / f"recv_{saving_name}.txt")
+
         rslt = decode(rslt)
         return rslt
+
+    def deploy_config(self):
+        """
+        在部署芯片上部署并使能相关核心, 同时清除神经元的相关状态
+        Args:
+            None
+        Returns:
+            None
+        """
+        dwnc_west,dwnc_east,east_flag=self._gen_deploy_flitin()
+        self._excute_dwnc_command(dwnc_west,self.app_path/'deploy',recv=False)
+        if east_flag:
+            self._excute_dwnc_command(dwnc_east,self.app_path/'deploy',recv=False)
+
+    def run_darwin3_withoutfile(self,spike_neurons):
+        '''
+        obselete api
+        '''
+        return self.run_darwin3_with_spikes(spike_neurons)
+
+    def run_darwin3_withfile(self,spike_neurons):
+        '''
+        obselete api
+        '''
+        return self.run_darwin3_with_spikes(spike_neurons)
 
     def run_darwin3_with_spikes(self, spike_list: list,saving_input=False,saving_recv=False,print_log=False):
         """
@@ -1547,18 +563,17 @@ class darwin3_device(object):
         # 生成spike的dwnc
         dwnc_list=self._gen_spike_input_dwnc(spike_list)
         if saving_input:
-            (self.app_path / 'input_files' / 'run_input.dwnc').write_text('\n'.join(dwnc_list))
+            (self._cache_path / 'run_input_dwnc.txt').write_text('\n'.join(dwnc_list))
 
-        rslt=self._excute_dwnc_command_west(
+        rslt=self._excute_dwnc_command(
             dwnc_list,
             self.app_path / 'input_files',
             'run_flitin',
             saving_input,
             saving_recv,
             print_log)
-        # input()
-        # return spikes(self._neuron_id_json_list,rslt,len(spike_list))
-        return parse_spike(self._output_neuron_info_jsons,rslt,len(spike_list))
+
+        return SpikeResult.parse_spike(self._output_neuron_info_jsons,rslt,len(spike_list))
 
     def dump_memory(self,dump_request:list[tuple],log=False,saving_intermediate_dir: Path | None =None) -> tuple[list[ResultBase]]:
         '''
@@ -1582,6 +597,7 @@ class darwin3_device(object):
 
         @saving_dwnc_path: saving intermediate files
         '''
+        raise NotImplementedError
         # construct dwnc list
         east_cmds=['0 cmd 0xc0000001\n']
         west_cmds=['0 cmd 0xc0000001\n']
@@ -1594,7 +610,7 @@ class darwin3_device(object):
                 _addr_iter=range(_offset,_offset+_length)
 
             for _2_addr in _addr_iter:
-                cmd = f"0 read {_x} {_y} {hex(_2_addr)} 1\n"    
+                cmd = f"0 read {_x} {_y} {hex(_2_addr)} 1\n"
                 if _x>=15:
                     east_cmds.append(cmd)
                 else:
@@ -1620,7 +636,7 @@ class darwin3_device(object):
                 with open(saving_intermediate_dir/'get_nc_dendrites_west.dwnc','w') as f:
                     f.writelines(west_cmds)
 
-            rslt_west= self._excute_dwnc_command_west(
+            rslt_west= self._excute_dwnc_command(
                 west_cmds,
                 saving_intermediate_dir,
                 'get_nc_dendrites_west_filtin',
@@ -1643,6 +659,7 @@ class darwin3_device(object):
         Returns: 
             rslt_east,rslt_west
         """
+        return NotImplementedError
         return self.dump_memory([(nc_position,length,0x0FFFF-offset,True)],log,saving_path)
     
     def get_dendrites_memory(self, nc_position:tuple,length:int,offset=0,log=False,saving_path: Path | None=None) -> tuple[list[ResultBase]]:
@@ -1658,6 +675,7 @@ class darwin3_device(object):
         Returns: 
             rslt_east,rslt_west
         """
+        raise NotImplementedError
         return self.dump_memory([(nc_position,length,0x10000+offset,False)],log,saving_path)
     
     def get_learn_memory(self, nc_position:tuple,length:int,offset=0, log=False,saving_path: Path | None=None) -> tuple[list[ResultBase]]:
@@ -1673,4 +691,5 @@ class darwin3_device(object):
         Returns: 
             rslt_east,rslt_west
         """
+        raise NotImplementedError
         return self.dump_memory([(nc_position,length,0x1DFFF-offset,True)],log,saving_path)
