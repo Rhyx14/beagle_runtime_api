@@ -27,8 +27,6 @@ setup(
           'Programming Language :: Python :: 3.10',
       ],
       install_requires=['numpy'],
-      entry_points={
-          'console_scripts':['beagle_board_server=beagle_runtime_api.server.board_server:main']},
       # package_data={'': ['*.json']},
       author='H. Xu', # 作者
       description='Yet another tools for darwin3.', # 介绍

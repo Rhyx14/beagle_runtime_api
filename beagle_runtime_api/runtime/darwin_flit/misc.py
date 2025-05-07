@@ -17,7 +17,7 @@ def decode_xy_single_board(hd):
             raise NotImplementedError(f'dst_port: {hd.dst_port}.')
     return _from_x,_from_y
 
-def encode_xy_single_board(hd,via_direction,target_x,target_y):
+def encode_xy_single_board(hd,target_x,target_y,via_direction):
     if via_direction == WEST:
         src_x = target_x + 1 # suppose all the pkgs are from x=-1
         src_y = 0

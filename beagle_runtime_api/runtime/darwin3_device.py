@@ -10,7 +10,7 @@ from .parser.result_base import ResultBase
 from .darwin_flit.decode import decode
 from .darwin_flit.encode import encode
 from .darwin_flit.result import SpikeResult
-from .darwin_flit. nc_pkgb import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD
+from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,WEST,EAST
 from .darwin_flit.parse_config import parse_compiler_config
 
 from x_secretary.utils.time import measure_time
@@ -106,25 +106,17 @@ class darwin3_device(object):
 
         # app_path (str): 存储应用的目录
         self.app_path=Path(app_path)
+
+
         # config_path (str): 配置文件目录
+        self.config_path = self.app_path / "config_files"
 
         self._cache_path=self.app_path / 'beagle_cache'
         Path.mkdir(self._cache_path,exist_ok=True,parents=True)
-
-        self.config_path = self.app_path / "config_files"
         # deploy_path (str): 部署文件目录 (.txt && .bin)
-        self.deploy_path = self.app_path / "deploy_files/"
-
+        self.deploy_path = self._cache_path
         # debug_path (str): 查询所有神经元状态信息存储目录 (仅用于调试)
-        self.debug_path = self.app_path / "debug_files/"
-        if not os.path.exists(self.deploy_path):
-            os.mkdir(self.deploy_path)
-        if not os.path.exists(self.input_path):
-            os.mkdir(self.input_path)
-        if not os.path.exists(self.output_path):
-            os.mkdir(self.output_path)
-        if not os.path.exists(self.debug_path):
-            os.mkdir(self.debug_path)
+        self.debug_path = self._cache_path
 
         # input_neuron (list): 读取 input_neuron.json 文件, 存储为list
         with open(self.config_path / "input_neuron.json", "r") as f:
@@ -140,7 +132,7 @@ class darwin3_device(object):
         for search_path in search_paths:
             file = search_path.name
             _neuron_coord = re.findall(r"\d+", file)
-            _neuron_coord = tuple(_neuron_coord)
+            _neuron_coord = (int(_neuron_coord[0]),int(_neuron_coord[1]))
             self.config_neuron_list.append(_neuron_coord)
             with open(self.config_path / file,'r') as f:
                 l = f.readlines()
@@ -509,12 +501,14 @@ class darwin3_device(object):
 
         return dwnc_list
 
-    def _excute_dwnc_command(self,dwnc_list,direction,saving_name='',recv=True,saving_recv=True) -> list[ResultBase]:
+    def _excute_dwnc_command(self,dwnc_list,direction,saving_name='',recv=True,saving_recv=False) -> list[ResultBase]:
         bin_io_rslt=encode(dwnc_list,direction)
         # send
+        Path.write_bytes(Path('tmp.bin'),bin_io_rslt)
+        input()
         rslt = self._transmit_flit(port=self.port[0], 
                             data_type=self.NORMAL_FLIT,
-                            flit_bin=bin_io_rslt.getvalue(),
+                            flit_bin=bin_io_rslt,
                             recv=recv,
                             recv_run_flit_file=None if not saving_recv else self._cache_path / f"recv_{saving_name}.txt")
 
@@ -530,9 +524,9 @@ class darwin3_device(object):
             None
         """
         dwnc_west,dwnc_east,east_flag=self._gen_deploy_flitin()
-        self._excute_dwnc_command(dwnc_west,self.app_path/'deploy',recv=False)
+        self._excute_dwnc_command(dwnc_west,WEST,'deploy',recv=False)
         if east_flag:
-            self._excute_dwnc_command(dwnc_east,self.app_path/'deploy',recv=False)
+            self._excute_dwnc_command(dwnc_east,EAST,'deploy',recv=False)
 
     def run_darwin3_withoutfile(self,spike_neurons):
         '''
@@ -567,11 +561,10 @@ class darwin3_device(object):
 
         rslt=self._excute_dwnc_command(
             dwnc_list,
-            self.app_path / 'input_files',
+            WEST,
             'run_flitin',
-            saving_input,
-            saving_recv,
-            print_log)
+            True,
+            saving_recv)
 
         return SpikeResult.parse_spike(self._output_neuron_info_jsons,rslt,len(spike_list))
 

@@ -13,11 +13,12 @@ def _read_and_parse(file:Path,list:list[tuple]) -> None:
         
         if len(_line)==0 : continue
         if _line[0] == '#' : continue
-        
-        _core_x,_core_y,_waddr=int(_line[2]),int(_line[3]),int(_line[4])
+        _line = _line.split()
+
+        _core_x,_core_y,_waddr=int(_line[2]),int(_line[3]),int(_line[4],16)
         
         if _line[1] == 'write' : 
-            list.append((PKG_WRITE,_core_x,_core_y,_waddr,int(_line[5])))
+            list.append((PKG_WRITE,_core_x,_core_y,_waddr,int(_line[5],16)))
         
         elif _line[1] == 'write_ram':
             with open(file.parent / _line[5]) as _f:
@@ -43,8 +44,7 @@ def parse_compiler_config(config_folder,template='*-*-config.dwnc'):
     # 将每个神经元的 config 文件整合到整体的 config 文件中
     search_paths = Path.glob(config_folder, template)
     for _search_path in search_paths:
-        _file = _search_path.name
-        x = re.findall(r"\d+", _file)[0]
-        _read_and_parse(_file, fwest if x<=15 else feast)
+        x = re.findall(r"\d+", _search_path.name)[0]
+        _read_and_parse(_search_path, fwest if int(x)<=15 else feast)
 
     return fwest,feast
