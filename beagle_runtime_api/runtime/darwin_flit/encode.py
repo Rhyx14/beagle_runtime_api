@@ -4,7 +4,7 @@ from .constant import WEST
 from .constant import PKG_CMD,PKG_READ,PKG_FLOW,PKG_SPIKE,PKG_WRITE
 from .nc_pkgb import CmdPkg,WritePkg,ReadPkg,SpikePkg
 
-LENTH_PKG=[2 for _ in range(20)]
+LENTH_PKG=[8 for _ in range(20)]
 LENTH_PKG[PKG_CMD]=4
 LENTH_PKG[PKG_WRITE]=16
 
