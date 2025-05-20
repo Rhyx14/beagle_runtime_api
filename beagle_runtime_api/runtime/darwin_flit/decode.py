@@ -23,7 +23,7 @@ def decode(flits_buffer) -> list:
         if hd.flit_type_head == FLIT_TYPE_CMD:
             hd=CmdPkg.from_buffer(mv,read_index)
             if hd.cmd== 0b011000:
-                tik = tik + hd.arg + 1 
+                tik += hd.arg + 1 
             read_index+=4
         else:
             _pkg_class=hd.pkg_class

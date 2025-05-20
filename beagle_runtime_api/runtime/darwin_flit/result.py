@@ -13,7 +13,6 @@ class SpikeResult():
         rslt = [[] for _ in range(time_step)]
         for _result in recvs:
             if _result.type==TYPE_SPIKE_RESULT:
-                # index = f"{_result.x}, {_result.y}, {_result.dedr_id}"
                 index = (_result.x,_result.y,_result.dedr_id)
                 for _file_name,_neuron_index_json in neuron_id_json_list:
                     _info=_neuron_index_json.get(index)

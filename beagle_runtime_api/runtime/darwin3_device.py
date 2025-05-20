@@ -5,7 +5,6 @@ from io import StringIO,BytesIO
 from pathlib import Path
 
 from .tcp_transmitter import Transmitter
-from .parser.result_base import ResultBase
 
 from .darwin_flit.decode import decode
 from .darwin_flit.encode import encode
@@ -482,17 +481,14 @@ class darwin3_device(object):
                     elif neuron_type == 1:
                         neu_idx = 0x0
                     for target in targets_list:
-                        x = target[0]
-                        y = target[1]
-                        derd_id = target[2]
-                        dwnc_list.append((PKG_SPIKE,x,y,neu_idx,derd_id))
+                        dwnc_list.append((PKG_SPIKE,target[0],target[1],neu_idx,target[2]))
             dwnc_list.append((PKG_CMD,0b011000,0)) # step 1
 
         dwnc_list.append((PKG_CMD,0,0)) # turn off
 
         return dwnc_list
 
-    def _excute_dwnc_command(self,dwnc_list,direction,saving_name='',recv=True,saving_recv=False) -> list[ResultBase]:
+    def _excute_dwnc_command(self,dwnc_list,direction,saving_name='',recv=True,saving_recv=False) -> list:
         bin_io_rslt=encode(dwnc_list,direction)
         # send
         # Path.write_bytes(Path('tmp.bin'),bin_io_rslt)
@@ -558,7 +554,7 @@ class darwin3_device(object):
 
         return SpikeResult.parse_spike(self._output_neuron_info_jsons,rslt,len(spike_list))
 
-    def dump_memory(self,dump_request:list[tuple],log=False,saving_intermediate_dir: Path | None =None) -> tuple[list[ResultBase]]:
+    def dump_memory(self,dump_request:list[tuple],log=False,saving_intermediate_dir: Path | None =None) -> tuple[list]:
         '''
         dump the memory of the specific neuromorphic core.
         ---
@@ -629,7 +625,7 @@ class darwin3_device(object):
             
         return rslt_east,rslt_west
     
-    def get_neuron_inference_status(self, nc_position:tuple,length:int,offset=0,log=False,saving_path: Path | None=None) -> tuple[list[ResultBase]]:
+    def get_neuron_inference_status(self, nc_position:tuple,length:int,offset=0,log=False,saving_path: Path | None=None) -> tuple[list]:
         """
         获取推理存储器内容
         ---
@@ -645,7 +641,7 @@ class darwin3_device(object):
         return NotImplementedError
         return self.dump_memory([(nc_position,length,0x0FFFF-offset,True)],log,saving_path)
     
-    def get_dendrites_memory(self, nc_position:tuple,length:int,offset=0,log=False,saving_path: Path | None=None) -> tuple[list[ResultBase]]:
+    def get_dendrites_memory(self, nc_position:tuple,length:int,offset=0,log=False,saving_path: Path | None=None) -> tuple[list]:
         """
         获取树突存储器内容
         ---
@@ -661,7 +657,7 @@ class darwin3_device(object):
         raise NotImplementedError
         return self.dump_memory([(nc_position,length,0x10000+offset,False)],log,saving_path)
     
-    def get_learn_memory(self, nc_position:tuple,length:int,offset=0, log=False,saving_path: Path | None=None) -> tuple[list[ResultBase]]:
+    def get_learn_memory(self, nc_position:tuple,length:int,offset=0, log=False,saving_path: Path | None=None) -> tuple[list]:
         """
         获取学习状态存储器内容
         ---
