@@ -14,6 +14,10 @@ from .darwin_flit.parse_config import parse_compiler_config
 
 from x_secretary.utils.time import measure_time
 
+try: 
+    import torch
+except ImportError as e:
+    print('PyTorch is not installed, ensure that no torch-API is used!')
 class darwin3_device(object):
     """
     用于和Darwin3开发板进行通信的类
@@ -106,25 +110,20 @@ class darwin3_device(object):
         # app_path (str): 存储应用的目录
         self.app_path=Path(app_path)
 
-
         # config_path (str): 配置文件目录
         self.config_path = self.app_path / "config_files"
 
+        # 输入输出目录，包括临时缓存
         self._cache_path=self.app_path / 'beagle_cache'
         Path.mkdir(self._cache_path,exist_ok=True,parents=True)
-        # deploy_path (str): 部署文件目录 (.txt && .bin)
-        self.deploy_path = self._cache_path
-        # debug_path (str): 查询所有神经元状态信息存储目录 (仅用于调试)
-        self.debug_path = self._cache_path
 
         # input_neuron (list): 读取 input_neuron.json 文件, 存储为list
         with open(self.config_path / "input_neuron.json", "r") as f:
             self.input_neuron = json.load(f)
 
         # config_neuron_list (list): 需要进行配置的神经元列表
-        self.config_file_format = "*-*-config.dwnc"
-        self.config_neuron_list = []
-        search_paths = Path.glob(self.config_path, self.config_file_format)
+        self._config_neuron_coord_list = []
+        search_paths = Path.glob(self.config_path, "*-*-config.dwnc")
 
         self.isreset = {}
         self.vtreset = {}
@@ -132,7 +131,7 @@ class darwin3_device(object):
             file = search_path.name
             _neuron_coord = re.findall(r"\d+", file)
             _neuron_coord = (int(_neuron_coord[0]),int(_neuron_coord[1]))
-            self.config_neuron_list.append(_neuron_coord)
+            self._config_neuron_coord_list.append(_neuron_coord)
             with open(self.config_path / file,'r') as f:
                 l = f.readlines()
                 index = len(l)-1
@@ -167,9 +166,9 @@ class darwin3_device(object):
             with open(self.config_path / file, "r") as f:
                 _js=json.load(f)
                 _new_json={}
-                for __x,__id in _js.items():
-                    _3_s=__x.split(',')
-                    _new_json[(int(_3_s[0]),int(_3_s[1]),int(_3_s[2]))]=__id
+                for _2_x,_2_id in _js.items():
+                    _3_s=_2_x.split(',')
+                    _new_json[(int(_3_s[0]),int(_3_s[1]),int(_3_s[2]))]=_2_id
                 self._output_neuron_info_jsons.append((output_name,_new_json))
 
         if os.path.exists(self.config_path / "delay_record.json"):
@@ -190,11 +189,11 @@ class darwin3_device(object):
         """
         raise NotImplementedError
         # 生成 dwnc 文件
-        with open(self.deploy_path / (dwnc_file + ".dwnc"), "w+") as fwest, \
-        open(self.deploy_path / (dwnc_file + "_east.dwnc"), "w+") as feast:
+        with open(self._cache_path / (dwnc_file + ".dwnc"), "w+") as fwest, \
+        open(self._cache_path / (dwnc_file + "_east.dwnc"), "w+") as feast:
             fwest.write('0 cmd 0xc0000001\n')
             feast.write('0 cmd 0xc0000001\n')
-            for neuron in self.config_neuron_list:
+            for neuron in self._config_neuron_coord_list:
                 if int(neuron[0]) <= 15:
                     fwest.write(f"0 write {neuron[0]} {neuron[1]} 0x15 0x1\n")
                 else:
@@ -203,7 +202,7 @@ class darwin3_device(object):
             fwest.write('0 cmd 0xc0000000\n')
             feast.write('0 cmd 0xc0000000\n')
         if self.deploy_from_east == False:
-            os.remove(self.deploy_path / (dwnc_file + "_east.dwnc"))
+            os.remove(self._cache_path / (dwnc_file + "_east.dwnc"))
         
         # 生成 flit 文件
         self.__flit_gen__(
@@ -219,9 +218,9 @@ class darwin3_device(object):
             )
             
         # 发送 flit 包到 Darwin3 板卡
-        self.__transmit_flit__(port=self.port[0], data_type=self.NORMAL_FLIT, fbin=self.deploy_path / (dwnc_file + "_flitin.bin"))
+        self.__transmit_flit__(port=self.port[0], data_type=self.NORMAL_FLIT, fbin=self._cache_path / (dwnc_file + "_flitin.bin"))
         if self.deploy_from_east:
-            self.__transmit_flit__(port=self.port[1], data_type=self.NORMAL_FLIT, fbin=self.deploy_path / (dwnc_file + "_flitin_east.bin"))
+            self.__transmit_flit__(port=self.port[1], data_type=self.NORMAL_FLIT, fbin=self._cache_path / (dwnc_file + "_flitin_east.bin"))
         return
     
     def disable_neurons(self, dwnc_file="disable"):
@@ -234,11 +233,11 @@ class darwin3_device(object):
         """
         raise NotImplementedError
         # 生成 dwnc 文件
-        with open(self.deploy_path / (dwnc_file + ".dwnc"), "w+") as fwest, \
-        open(self.deploy_path / (dwnc_file + "_east.dwnc"), "w+") as feast:
+        with open(self._cache_path / (dwnc_file + ".dwnc"), "w+") as fwest, \
+        open(self._cache_path / (dwnc_file + "_east.dwnc"), "w+") as feast:
             fwest.write('0 cmd 0xc0000001\n')
             feast.write('0 cmd 0xc0000001\n')
-            for neuron in self.config_neuron_list:
+            for neuron in self._config_neuron_coord_list:
                 if int(neuron[0]) <= 15:
                     fwest.write(f"0 write {neuron[0]} {neuron[1]} 0x15 0x1\n")
                 else:
@@ -247,7 +246,7 @@ class darwin3_device(object):
             fwest.write('0 cmd 0xc0000000\n')
             feast.write('0 cmd 0xc0000000\n')
         if self.deploy_from_east == False:
-            os.remove(self.deploy_path + dwnc_file + "_east.dwnc")
+            os.remove(self._cache_path + dwnc_file + "_east.dwnc")
             
         # 生成 flit 文件
         self.__flit_gen__(
@@ -263,9 +262,9 @@ class darwin3_device(object):
             )
             
         # 发送 flit 包到 Darwin3 板卡
-        self.__transmit_flit__(port=self.port[0], data_type=self.NORMAL_FLIT, fbin=self.deploy_path / (dwnc_file+"_flitin.bin"))
+        self.__transmit_flit__(port=self.port[0], data_type=self.NORMAL_FLIT, fbin=self._cache_path / (dwnc_file+"_flitin.bin"))
         if self.deploy_from_east:
-            self.__transmit_flit__(port=self.port[1], data_type=self.NORMAL_FLIT, fbin=self.deploy_path / (dwnc_file+"_flitin_east.bin"))
+            self.__transmit_flit__(port=self.port[1], data_type=self.NORMAL_FLIT, fbin=self._cache_path / (dwnc_file+"_flitin_east.bin"))
         return
         
     def clear_neurons_states(self, ISC=False, LSC=False, clear=True, dwnc_file="clear_states"):
@@ -288,12 +287,13 @@ class darwin3_device(object):
         if not self.clear_state_had_started:
             self._cached_clear_state=Path.read_bytes(self.app_path / 'deploy_files' / 'clear_states_flitin.bin')
             self.clear_state_had_started=True
+
             # clear_type = int(''.join(str(int(b)) for b in [ISC, LSC, clear]), 2)
             
             # fwest=[(PKG_CMD,0,1)]
             # feast=[(PKG_CMD,0,1)]
 
-            # for neuron in self.config_neuron_list:
+            # for neuron in self._config_neuron_coord_list:
             #     if int(neuron[0]) <= 15:
             #         fwest.append((PKG_WRITE,neuron[0],neuron[1],0x04,clear_type))
             #         # if neuron in self.isreset:
@@ -316,13 +316,12 @@ class darwin3_device(object):
             #         else:
             #             fwest.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
             #             feast.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
-            #             # fwest.write(f'0 write {coord[0]} {coord[1]} {hex(0x00800+value[0])} {hex(value[1])}\n')
-            #             # fwest.write(f'0 write {coord[0]} {coord[1]} {hex(0x00800+value[2])} {hex(value[3])}\n')                       
+                      
             # fwest.append((PKG_CMD,0,0))
             # feast.append((PKG_CMD,0,0))
 
             # self._cached_clear_state=encode(fwest,WEST)
-            Path.write_bytes(self._cache_path/Path('clear.bin'),self._cached_clear_state)
+            # Path.write_bytes(self._cache_path/Path('clear.bin'),self._cached_clear_state)
             # self.clear_state_had_started = True
         
         # send
@@ -348,7 +347,7 @@ class darwin3_device(object):
 
         deploy_from_east_flag = False
         # 清除神经元推理状态和权重和
-        for neuron in self.config_neuron_list:
+        for neuron in self._config_neuron_coord_list:
             if int(neuron[0]) <= 15:
                 west_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x04,0x5))
             else:
@@ -370,13 +369,13 @@ class darwin3_device(object):
         east_dwnc_list.append((PKG_CMD,0b100000,self.hardware_step_size))
 
         # 使能神经元，清除神经元权重和
-        for neuron in self.config_neuron_list:
-            if int(neuron[0]) <= 15:
-                west_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x15,0x1))
-                west_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x04,0x1))
+        for _neuron_core_x,_neuron_core_y in self._config_neuron_coord_list:
+            if _neuron_core_x <= 15:
+                west_dwnc_list.append((PKG_WRITE,_neuron_core_x,_neuron_core_y,0x15,0x1))
+                west_dwnc_list.append((PKG_WRITE,_neuron_core_x,_neuron_core_y,0x04,0x1))
             else:
-                east_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x15,0x1))
-                east_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x04,0x1))
+                east_dwnc_list.append((PKG_WRITE,_neuron_core_x,_neuron_core_y,0x15,0x1))
+                east_dwnc_list.append((PKG_WRITE,_neuron_core_x,_neuron_core_y,0x04,0x1))
     
         return west_dwnc_list,east_dwnc_list,deploy_from_east_flag
 
@@ -554,6 +553,45 @@ class darwin3_device(object):
             saving_recv)
 
         return SpikeResult.parse_spike(self._output_neuron_info_jsons,rslt,max_tik_index+1)
+    
+    def run_with_torch_tensor(self,spike_tensor,output_layer_name,output_shape:tuple,extra_time_steps=0,saving_input=False,saving_recv=False,print_log=False):
+        """
+        接收应用给的 PyTorch Tensor
+        Args:
+            spike_tensor: in [t x], 注意batch_size必须为1
+        Returns:
+            result tensor: in [t x] 本次运行结束时硬件返回给应用的脉冲
+        """
+
+        t,_=spike_tensor.shape
+        spike_list=[]
+        for _i in range(t):
+            spike_list.append(torch.where(spike_tensor[_i]==1)[0].tolist())
+        
+        for _ in range(extra_time_steps): spike_list.append([])
+
+
+        # 生成spike的dwnc
+        dwnc_list=self._gen_spike_input_dwnc(spike_list)
+        if saving_input:
+            (self._cache_path / 'run_input_dwnc.txt').write_text('\n'.join(dwnc_list))
+
+        max_tik_index,rslt=self._excute_dwnc_command(
+            dwnc_list,
+            WEST,
+            'run_flitin',
+            True,
+            saving_recv)
+
+        rslt=SpikeResult.parse_spike_single_layer(self._output_neuron_info_jsons[0][1],rslt,max_tik_index+1)
+        
+        target_t,target_x=output_shape
+        output_spike=torch.zeros(target_t,target_x)
+        rslt=rslt[-target_t:]
+        for _t,_spike_ids in enumerate(rslt):
+            output_spike[_t,torch.tensor(_spike_ids)]=1
+        
+        return output_spike
 
     def dump_memory(self,dump_request:list[tuple],log=False,saving_intermediate_dir: Path | None =None) -> tuple[list]:
         '''
@@ -606,7 +644,7 @@ class darwin3_device(object):
                 f.writelines(east_cmds)
             self.__flit_gen_east__(type="debug", input_file='get_nc_denrites_east.dwnc', output_file='get_nc_denrites_east_flitin')
             self.__transmit_flit__(port=self.port[1], data_type=0x8000, 
-                                   fbin=self.debug_path+'get_nc_denrites_east_flitin.bin', 
+                                   fbin=self._cache_path+'get_nc_denrites_east_flitin.bin', 
                                    recv=True, recv_run_flit_file="get_nc_denrites_east_recv",
                                    debug=True)
             rslt_east=parse_flit(recv_run_flit_file='get_nc_denrites_east_recv', log=log)

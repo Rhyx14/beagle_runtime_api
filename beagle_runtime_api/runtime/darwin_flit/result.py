@@ -19,6 +19,14 @@ class SpikeResult():
                     if _info is not None: rslt[_result.tik].append((_file_name,_info))
         return rslt
     
+    @staticmethod
+    def parse_spike_single_layer(neuron_id_json,recvs:list,time_step:int):
+        rslt = [[] for _ in range(time_step)]
+        for _result in recvs:
+            if _result.type==TYPE_SPIKE_RESULT:
+                rslt[_result.tik].append(neuron_id_json[(_result.x,_result.y,_result.dedr_id)])
+        return rslt
+    
 #     def __str__(self) -> str:
 #         return f'{super().__str__()}, dedr_id=0x{self.dedr_id:04x}, neu_idx=0x{self.neu_idx:03x}'
 
