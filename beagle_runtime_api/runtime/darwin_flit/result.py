@@ -16,7 +16,7 @@ class SpikeResult():
                 index = (_result.x,_result.y,_result.dedr_id)
                 for _file_name,_neuron_index_json in neuron_id_json_list:
                     _info=_neuron_index_json.get(index)
-                    if _info is not None: rslt[_result.tik-1].append((_file_name,_info))
+                    if _info is not None: rslt[_result.tik].append((_file_name,_info))
         return rslt
     
 #     def __str__(self) -> str:

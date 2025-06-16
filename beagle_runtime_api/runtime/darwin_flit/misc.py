@@ -38,7 +38,8 @@ def encode_xy_single_board(hd,target_x,target_y,via_direction):
         dst_x_sign = 1
 
         dst_y = 0
-        dst_y_sign 
+        dst_y_sign = 0
+        route_id = target_y
 
     else:
         raise NotImplementedError

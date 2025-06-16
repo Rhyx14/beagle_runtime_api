@@ -152,7 +152,7 @@ class darwin3_device(object):
 
         # deploy_from_east (bool): 判断是否需要从东边进行配置
         self.deploy_from_east = False
-        self.clear_sate_had_started = False
+        self.clear_state_had_started = False
         self.printc = spk_print
         self.deploy_config_had_started = False
 
@@ -285,46 +285,47 @@ class darwin3_device(object):
             None
         """
         # 根据需要重置的内容生成指令
-        if not self.clear_sate_had_started:
-            clear_type = int(''.join(str(int(b)) for b in [ISC, LSC, clear]), 2)
+        if not self.clear_state_had_started:
+            self._cached_clear_state=Path.read_bytes(self.app_path / 'deploy_files' / 'clear_states_flitin.bin')
+            self.clear_state_had_started=True
+            # clear_type = int(''.join(str(int(b)) for b in [ISC, LSC, clear]), 2)
             
-            fwest=[(PKG_CMD,0,1)]
-            feast=[(PKG_CMD,0,1)]
+            # fwest=[(PKG_CMD,0,1)]
+            # feast=[(PKG_CMD,0,1)]
 
-            for neuron in self.config_neuron_list:
-                if int(neuron[0]) <= 15:
-                    fwest.append((PKG_WRITE,neuron[0],neuron[1],0x04,clear_type))
-                    # fwest.write(f'0 write {neuron[0]} {neuron[1]} 0x04 {clear_type}\n')
-                    # if neuron in self.isreset:
-                        # fwest.write(self.isreset[neuron])
-                    # if neuron in self.vtreset:
-                        # fwest.write(self.vtreset[neuron])
-                else:
-                    self.deploy_from_east = True
-                    feast.append((PKG_WRITE,neuron[0],neuron[1],0x04,clear_type))
-                    # feast.write(f'0 write {neuron[0]} {neuron[1]} 0x04 {clear_type}\n')
-                    # if neuron in self.isreset:
-                        # feast.write(self.isreset[neuron])
-                    # if neuron in self.vtreset:
-                        # feast.write(self.vtreset[neuron])
-                for key,value in self.delay_neuron.items():
-                    coord = eval(key)
-                    if coord[0] <= 15:
-                        fwest.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
-                        fwest.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
-                    else:
-                        fwest.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
-                        feast.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
-                        # fwest.write(f'0 write {coord[0]} {coord[1]} {hex(0x00800+value[0])} {hex(value[1])}\n')
-                        # fwest.write(f'0 write {coord[0]} {coord[1]} {hex(0x00800+value[2])} {hex(value[3])}\n')                       
-            fwest.append((PKG_CMD,0,0))
-            feast.append((PKG_CMD,0,0))
+            # for neuron in self.config_neuron_list:
+            #     if int(neuron[0]) <= 15:
+            #         fwest.append((PKG_WRITE,neuron[0],neuron[1],0x04,clear_type))
+            #         # if neuron in self.isreset:
+            #             # fwest.write(self.isreset[neuron])
+            #         # if neuron in self.vtreset:
+            #             # fwest.write(self.vtreset[neuron])
+            #     else:
+            #         self.deploy_from_east = True
+            #         feast.append((PKG_WRITE,neuron[0],neuron[1],0x04,clear_type))
+            #         # feast.write(f'0 write {neuron[0]} {neuron[1]} 0x04 {clear_type}\n')
+            #         # if neuron in self.isreset:
+            #             # feast.write(self.isreset[neuron])
+            #         # if neuron in self.vtreset:
+            #             # feast.write(self.vtreset[neuron])
+            #     for key,value in self.delay_neuron.items():
+            #         coord = eval(key)
+            #         if coord[0] <= 15:
+            #             fwest.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
+            #             fwest.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
+            #         else:
+            #             fwest.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
+            #             feast.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
+            #             # fwest.write(f'0 write {coord[0]} {coord[1]} {hex(0x00800+value[0])} {hex(value[1])}\n')
+            #             # fwest.write(f'0 write {coord[0]} {coord[1]} {hex(0x00800+value[2])} {hex(value[3])}\n')                       
+            # fwest.append((PKG_CMD,0,0))
+            # feast.append((PKG_CMD,0,0))
 
-            self._cached_clear_state=encode(feast,WEST)
-            self.clear_sate_had_started = True
+            # self._cached_clear_state=encode(fwest,WEST)
+            Path.write_bytes(self._cache_path/Path('clear.bin'),self._cached_clear_state)
+            # self.clear_state_had_started = True
+        
         # send
-        # Path.write_bytes(Path('tmp.bin'),bin_io_rslt)
-        # input('save bin')
         self._transmit_flit(port=self.port[0], 
             data_type=self.NORMAL_FLIT,
             flit_bin=self._cached_clear_state,
@@ -470,6 +471,7 @@ class darwin3_device(object):
         """
         dwnc_list=[(PKG_CMD,0,1)] # open time step
         for _i in range(0, len(neuron_spike_list)):
+            dwnc_list.append((PKG_CMD,0b011000,0)) # step 1
             cur_spike_neuron_list = neuron_spike_list[_i]
             for spike_neuron in cur_spike_neuron_list:
                 neuron_info = self.input_neuron[str(spike_neuron)]
@@ -482,7 +484,7 @@ class darwin3_device(object):
                         neu_idx = 0x0
                     for target in targets_list:
                         dwnc_list.append((PKG_SPIKE,target[0],target[1],neu_idx,target[2]))
-            dwnc_list.append((PKG_CMD,0b011000,0)) # step 1
+            # dwnc_list.append((PKG_CMD,0b011000,0)) # step 1
 
         dwnc_list.append((PKG_CMD,0,0)) # turn off
 
@@ -491,15 +493,14 @@ class darwin3_device(object):
     def _excute_dwnc_command(self,dwnc_list,direction,saving_name='',recv=True,saving_recv=False) -> list:
         bin_io_rslt=encode(dwnc_list,direction)
         # send
-        # Path.write_bytes(Path('tmp.bin'),bin_io_rslt)
-        # input('save bin')
+        # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
         rslt = self._transmit_flit(port=self.port[0], 
                             data_type=self.NORMAL_FLIT,
                             flit_bin=bin_io_rslt,
                             recv=recv,
                             recv_run_flit_file=None if not saving_recv else self._cache_path / f"recv_{saving_name}.txt")
-        rslt = decode(rslt)
-        return rslt
+        max_tik_index,rslt = decode(rslt)
+        return max_tik_index,rslt
 
     def deploy_config(self):
         """
@@ -545,14 +546,14 @@ class darwin3_device(object):
         if saving_input:
             (self._cache_path / 'run_input_dwnc.txt').write_text('\n'.join(dwnc_list))
 
-        rslt=self._excute_dwnc_command(
+        max_tik_index,rslt=self._excute_dwnc_command(
             dwnc_list,
             WEST,
             'run_flitin',
             True,
             saving_recv)
 
-        return SpikeResult.parse_spike(self._output_neuron_info_jsons,rslt,len(spike_list))
+        return SpikeResult.parse_spike(self._output_neuron_info_jsons,rslt,max_tik_index+1)
 
     def dump_memory(self,dump_request:list[tuple],log=False,saving_intermediate_dir: Path | None =None) -> tuple[list]:
         '''

@@ -13,7 +13,7 @@ def decode(flits_buffer) -> list:
         flit list(解析后)
     """
 
-    tik = 0
+    max_tik_index = 0
     rw_rslt=[]
     read_index=0
     mv= flits_buffer.getbuffer()
@@ -23,7 +23,7 @@ def decode(flits_buffer) -> list:
         if hd.flit_type_head == FLIT_TYPE_CMD:
             hd=CmdPkg.from_buffer(mv,read_index)
             if hd.cmd== 0b011000:
-                tik += hd.arg + 1 
+                max_tik_index += hd.arg + 1 
             read_index+=4
         else:
             _pkg_class=hd.pkg_class
@@ -39,8 +39,8 @@ def decode(flits_buffer) -> list:
             elif _pkg_class == PKG_SPIKE : # spikes
                 _pkg=SpikePkg.from_buffer(mv,read_index)
                 read_index +=8
-                rw_rslt.append(SpikeResult(tik,_pkg))
+                rw_rslt.append(SpikeResult(max_tik_index,_pkg))
 
             else:
                 raise NotImplementedError(f"unknown pkg_class {_pkg_class}.")
-    return rw_rslt
+    return max_tik_index,rw_rslt
