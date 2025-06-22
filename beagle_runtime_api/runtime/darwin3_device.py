@@ -4,13 +4,15 @@ import logging,os,json,glob,re,struct,time
 from io import StringIO,BytesIO
 from pathlib import Path
 
+from .compiler_model import CompilerModel
+
 from .tcp_transmitter import Transmitter
 
 from .darwin_flit.decode import decode
 from .darwin_flit.encode import encode
 from .darwin_flit.result import SpikeResult
 from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,WEST,EAST
-from .darwin_flit.parse_config import parse_compiler_config
+from .darwin_flit.command_list import CommandList
 
 from x_secretary.utils.time import measure_time
 
@@ -110,73 +112,13 @@ class darwin3_device(object):
         # app_path (str): 存储应用的目录
         self.app_path=Path(app_path)
 
-        # config_path (str): 配置文件目录
-        self.config_path = self.app_path / "config_files"
-
         # 输入输出目录，包括临时缓存
         self._cache_path=self.app_path / 'beagle_cache'
         Path.mkdir(self._cache_path,exist_ok=True,parents=True)
 
-        # input_neuron (list): 读取 input_neuron.json 文件, 存储为list
-        with open(self.config_path / "input_neuron.json", "r") as f:
-            self.input_neuron = json.load(f)
-
-        # config_neuron_list (list): 需要进行配置的神经元列表
-        self._config_neuron_coord_list = []
-        search_paths = Path.glob(self.config_path, "*-*-config.dwnc")
-
-        self.isreset = {}
-        self.vtreset = {}
-        for search_path in search_paths:
-            file = search_path.name
-            _neuron_coord = re.findall(r"\d+", file)
-            _neuron_coord = (int(_neuron_coord[0]),int(_neuron_coord[1]))
-            self._config_neuron_coord_list.append(_neuron_coord)
-            with open(self.config_path / file,'r') as f:
-                l = f.readlines()
-                index = len(l)-1
-                flag2 = False
-                flag1 = False
-                while index>=0:
-                    temp = l[index].split()
-                    if len(temp)>=6 and 'is' in temp[5]:
-                        self.isreset[_neuron_coord] = l[index]
-                        flag1 = True
-                    elif len(temp)>=6 and 'vt' in temp[5]:
-                        self.vtreset[_neuron_coord] = l[index]
-                        flag2 = True
-                    if flag1 and flag2:
-                        break
-                    index -= 1
-
-        # deploy_from_east (bool): 判断是否需要从东边进行配置
-        self.deploy_from_east = False
         self.clear_state_had_started = False
-        self.printc = spk_print
-        self.deploy_config_had_started = False
 
-        format = "output_neuron*.json"
-        pattern = re.compile(r'output_neuron_(.*?)\.json')
-        search_paths = Path.glob(self.config_path , format)
-        self._output_neuron_info_jsons=[]
-        for search_path in search_paths:
-            file = search_path.name
-            output_name = pattern.match(file).group(1)
-            # self.output_neuron_info_jsons.append((output_name,json.load(f)))
-            with open(self.config_path / file, "r") as f:
-                _js=json.load(f)
-                _new_json={}
-                for _2_x,_2_id in _js.items():
-                    _3_s=_2_x.split(',')
-                    _new_json[(int(_3_s[0]),int(_3_s[1]),int(_3_s[2]))]=_2_id
-                self._output_neuron_info_jsons.append((output_name,_new_json))
-
-        if os.path.exists(self.config_path / "delay_record.json"):
-            with open(self.config_path / "delay_record.json", "r") as f:
-                self.delay_neuron = json.load(f)
-        else:
-            self.delay_neuron = {}
-        
+        self.model=CompilerModel(self.app_path / "config_files")
         return
 
     def enable_neurons(self, dwnc_file="enable"):
@@ -283,51 +225,46 @@ class darwin3_device(object):
         Returns:
             None
         """
-        # 根据需要重置的内容生成指令
-        if not self.clear_state_had_started:
-            self._cached_clear_state=Path.read_bytes(self.app_path / 'deploy_files' / 'clear_states_flitin.bin')
-            self.clear_state_had_started=True
-
-            # clear_type = int(''.join(str(int(b)) for b in [ISC, LSC, clear]), 2)
-            
-            # fwest=[(PKG_CMD,0,1)]
-            # feast=[(PKG_CMD,0,1)]
-
-            # for neuron in self._config_neuron_coord_list:
-            #     if int(neuron[0]) <= 15:
-            #         fwest.append((PKG_WRITE,neuron[0],neuron[1],0x04,clear_type))
-            #         # if neuron in self.isreset:
-            #             # fwest.write(self.isreset[neuron])
-            #         # if neuron in self.vtreset:
-            #             # fwest.write(self.vtreset[neuron])
-            #     else:
-            #         self.deploy_from_east = True
-            #         feast.append((PKG_WRITE,neuron[0],neuron[1],0x04,clear_type))
-            #         # feast.write(f'0 write {neuron[0]} {neuron[1]} 0x04 {clear_type}\n')
-            #         # if neuron in self.isreset:
-            #             # feast.write(self.isreset[neuron])
-            #         # if neuron in self.vtreset:
-            #             # feast.write(self.vtreset[neuron])
-            #     for key,value in self.delay_neuron.items():
-            #         coord = eval(key)
-            #         if coord[0] <= 15:
-            #             fwest.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
-            #             fwest.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
-            #         else:
-            #             fwest.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
-            #             feast.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
-                      
-            # fwest.append((PKG_CMD,0,0))
-            # feast.append((PKG_CMD,0,0))
-
-            # self._cached_clear_state=encode(fwest,WEST)
-            # Path.write_bytes(self._cache_path/Path('clear.bin'),self._cached_clear_state)
-            # self.clear_state_had_started = True
+        # if not self.clear_state_had_started:
+        #     self._cached_clear_state=Path.read_bytes(self.app_path / 'deploy_files' / 'clear_states_flitin.bin')
+        #     self.clear_state_had_started=True
         
+        # 根据需要重置的内容生成指令
+        if CommandList.global_list.get('cls') is None: 
+            west_dwnc_list=CommandList(entry=WEST)
+            east_dwnc_list=CommandList(entry=EAST)
+
+            west_dwnc_list.append((PKG_CMD,0,1))
+            east_dwnc_list.append((PKG_CMD,0,1))
+
+            for _x,_y in self.model.used_neuron_cores.keys():
+                if _x <= 15: west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0b111)) # 清空
+                else:        east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0b111))
+
+            west_dwnc_list.extend(self.model.clear_is_west)
+            east_dwnc_list.extend(self.model.clear_is_east)
+            
+            for key,value in self.model.delay_neuron.items():
+                coord = eval(key)
+                if coord[0] <= 15:
+                    west_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
+                    west_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
+                else:
+                    east_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
+                    east_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
+
+            west_dwnc_list.append((PKG_CMD,0,0))
+            east_dwnc_list.append((PKG_CMD,0,0))
+
+            CommandList.global_list['cls']=(west_dwnc_list,east_dwnc_list)
+        else:
+            west_dwnc_list,east_dwnc_list=CommandList.global_list['cls']
+
         # send
         self._transmit_flit(port=self.port[0], 
             data_type=self.NORMAL_FLIT,
-            flit_bin=self._cached_clear_state,
+            # flit_bin=self._cached_clear_state,
+            flit_bin=west_dwnc_list.encode(),
             recv=False,
             recv_run_flit_file=None)
         return
@@ -341,43 +278,35 @@ class darwin3_device(object):
         Returns:
             None
         """
-        # 打开东西向传输的文件
-        west_dwnc_list=[]
-        east_dwnc_list=[]
+        # 东西向传输
+        west_dwnc_list=CommandList(entry=WEST)
+        east_dwnc_list=CommandList(entry=EAST)
 
-        deploy_from_east_flag = False
-        # 清除神经元推理状态和权重和
-        for neuron in self._config_neuron_coord_list:
-            if int(neuron[0]) <= 15:
-                west_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x04,0x5))
-            else:
-                deploy_from_east_flag = True
-                east_dwnc_list.append((PKG_WRITE,neuron[0],neuron[1],0x04,0x5))
-        
-        fw,fe=parse_compiler_config(self.config_path)
-        west_dwnc_list.extend(fw)
-        east_dwnc_list.extend(fe)
+        for _cmd_list in self.model.used_neuron_cores.values():
+            if _cmd_list.entry==WEST: west_dwnc_list.extend(_cmd_list)
+            if _cmd_list.entry==EAST: east_dwnc_list.extend(_cmd_list)
 
         # 加入开启/停止tik控制对 => 代表配置结束
         west_dwnc_list.append((PKG_CMD,0,1))
         west_dwnc_list.append((PKG_CMD,0,0))
+
         east_dwnc_list.append((PKG_CMD,0,1))
         east_dwnc_list.append((PKG_CMD,0,0))
 
-        # 设置tick
+        # 设置hardware_step_size
         west_dwnc_list.append((PKG_CMD,0b100000,self.hardware_step_size))
         east_dwnc_list.append((PKG_CMD,0b100000,self.hardware_step_size))
 
-        # 使能神经元，清除神经元权重和
-        for _neuron_core_x,_neuron_core_y in self._config_neuron_coord_list:
-            if _neuron_core_x <= 15:
-                west_dwnc_list.append((PKG_WRITE,_neuron_core_x,_neuron_core_y,0x15,0x1))
-                west_dwnc_list.append((PKG_WRITE,_neuron_core_x,_neuron_core_y,0x04,0x1))
+        # 清除神经元推理状态和权重和
+        for _x,_y in self.model.used_neuron_cores.keys():
+            if _x <= 15:
+                west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x5)) # 清空
+                west_dwnc_list.append((PKG_WRITE,_x,_y,0x15,0x1)) # 使能
             else:
-                east_dwnc_list.append((PKG_WRITE,_neuron_core_x,_neuron_core_y,0x15,0x1))
-                east_dwnc_list.append((PKG_WRITE,_neuron_core_x,_neuron_core_y,0x04,0x1))
-    
-        return west_dwnc_list,east_dwnc_list,deploy_from_east_flag
+                east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x5))
+                east_dwnc_list.append((PKG_WRITE,_x,_y,0x15,0x1))
+
+        return west_dwnc_list,east_dwnc_list
 
     def reset(self):
         """
@@ -473,7 +402,7 @@ class darwin3_device(object):
             dwnc_list.append((PKG_CMD,0b011000,0)) # step 1
             cur_spike_neuron_list = neuron_spike_list[_i]
             for spike_neuron in cur_spike_neuron_list:
-                neuron_info = self.input_neuron[str(spike_neuron)]
+                neuron_info = self.model.input_neuron[str(spike_neuron)]
                 if len(neuron_info) > 0:
                     neuron_type = neuron_info[0]
                     targets_list = neuron_info[-1]
@@ -490,7 +419,10 @@ class darwin3_device(object):
         return dwnc_list
 
     def _excute_dwnc_command(self,dwnc_list,direction,saving_name='',recv=True,saving_recv=False) -> list:
-        bin_io_rslt=encode(dwnc_list,direction)
+        if isinstance(dwnc_list,CommandList):
+            bin_io_rslt=dwnc_list.encode()
+        else:
+            bin_io_rslt=encode(dwnc_list,direction)
         # send
         # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
         rslt = self._transmit_flit(port=self.port[0], 
@@ -509,10 +441,9 @@ class darwin3_device(object):
         Returns:
             None
         """
-        dwnc_west,dwnc_east,east_flag=self._gen_deploy_flitin()
+        dwnc_west,dwnc_east=self._gen_deploy_flitin()
         self._excute_dwnc_command(dwnc_west,WEST,'deploy',recv=False)
-        if east_flag:
-            self._excute_dwnc_command(dwnc_east,EAST,'deploy',recv=False)
+        # self._excute_dwnc_command(dwnc_east,EAST,'deploy',recv=False)
 
     def run_darwin3_withoutfile(self,spike_neurons):
         '''
@@ -552,7 +483,7 @@ class darwin3_device(object):
             True,
             saving_recv)
 
-        return SpikeResult.parse_spike(self._output_neuron_info_jsons,rslt,max_tik_index+1)
+        return SpikeResult.parse_spike(self.model.output_neuron_info_jsons,rslt,max_tik_index+1)
     
     def run_with_torch_tensor(self,spike_tensor,output_layer_name,output_shape:tuple,extra_time_steps=0,saving_input=False,saving_recv=False,print_log=False):
         """
@@ -583,7 +514,7 @@ class darwin3_device(object):
             True,
             saving_recv)
 
-        rslt=SpikeResult.parse_spike_single_layer(self._output_neuron_info_jsons[0][1],rslt,max_tik_index+1)
+        rslt=SpikeResult.parse_spike_single_layer(self.model.output_neuron_info_jsons[output_layer_name],rslt,max_tik_index+1)
         
         target_t,target_x=output_shape
         output_spike=torch.zeros(target_t,target_x)
