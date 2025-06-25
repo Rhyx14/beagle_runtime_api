@@ -1,4 +1,7 @@
+from io import BytesIO
 import socket,struct
+MAX_FLIT_SIZE = 2 ** 26  # 0.25GB
+from loguru import logger
 class Transmitter(object):
     """
     用于建立TCP连接的类
@@ -13,54 +16,31 @@ class Transmitter(object):
     def close(self):
         self.socket_inst.close()
 
-    def send_flit_bin(self, flit_bin_file, data_type):
+    def send_flit_bin(self, flit_bin:bytes | bytearray,data_type, directions=0):
         """
         发送flit
         """
-        with open(flit_bin_file, "rb") as file:
-            flit_bin = file.read()
         length = len(flit_bin) >> 2
-        if length > 2**26:
-            print("====== %s is larger than 0.25GB" % flit_bin_file)
-            print("====== send flit length failed")
-            return 0
+        if length > MAX_FLIT_SIZE:
+            logger.error("flit size is larger than 0.25GB, send flit length failed!")
+            return 1
         send_bytes = bytearray()
-        send_bytes += struct.pack("I", length)
-        send_bytes += struct.pack("I", data_type)
-        send_bytes += flit_bin
-        self.socket_inst.sendall(send_bytes)
-        return 1
-
-    def send_flit_bin_quick(self, flit_bin, data_type):
-        """
-        发送flit
-        """
-        # with open(flit_bin_file, "rb") as file:
-            # flit_bin = file.read()
-        length = len(flit_bin) >> 2
-        if length > 2**26:
-            print("====== data is larger than 0.25GB")
-            print("====== send flit length failed")
-            return 0
-        send_bytes = bytearray()
-        send_bytes += struct.pack("I", length)
-        send_bytes += struct.pack("I", data_type)
-        send_bytes += flit_bin
-        self.socket_inst.sendall(send_bytes)
-        return 1
+        send_bytes += struct.pack("II", length,data_type)
+        # send_bytes += struct.pack("I", data_type)
+        # send_bytes += flit_bin
+        self.socket_inst.sendall(send_bytes + flit_bin)
+        return 0
     
-    def send_flit_bin_without_file(self, flit_bin:bytes | bytearray,data_type, directions=0):
-        """
-        发送flit
-        """
-        length = len(flit_bin) >> 2
-        if length > 2**26:
-            print("===<2>=== flit size is larger than 0.25GB")
-            print("===<2>=== send flit length failed")
-            return 0
-        send_bytes = bytearray()
-        send_bytes += struct.pack("I", length)
-        send_bytes += struct.pack("I", data_type)
-        send_bytes += flit_bin
-        self.socket_inst.sendall(send_bytes)
-        return 1
+    def recv(self,recv_run_flit_file):
+        fout = BytesIO()
+        data_len=0
+        while True:
+            request = self.socket_inst.recv(10240)
+            if not request: break # 无数据时退出
+            data_len += len(request)
+            fout.write(request)
+        if data_len % 4 !=0:
+            print(f"received data is not intact (with {len})!")
+        if recv_run_flit_file is not None:
+            recv_run_flit_file.write_bytes(fout.getvalue())
+        return fout

@@ -3,6 +3,7 @@ import numpy as np
 import logging,os,json,glob,re,struct,time
 from io import StringIO,BytesIO
 from pathlib import Path
+from enum import Enum
 
 from .compiler_model import CompilerModel
 
@@ -13,21 +14,25 @@ from .darwin_flit.encode import encode
 from .darwin_flit.result import SpikeResult
 from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,WEST,EAST
 from .darwin_flit.command_list import CommandList
-
 from x_secretary.utils.time import measure_time
 
 try: 
     import torch
 except ImportError as e:
     print('PyTorch is not installed, ensure that no torch-API is used!')
+
+class FlitType():
+    CHIP_RESET = 10
+    SET_FREQUENCY = 11
+    NORMAL_FLIT = 0x8000
+    CLEAR_STATE = 0x8000
+    RESET_SPIKING_INPUT= 0x8000
+
 class darwin3_device(object):
     """
     用于和Darwin3开发板进行通信的类
     """
-    CHIP_RESET = 10
-    SET_FREQUENCY = 11
-    NORMAL_FLIT = 0x8000
-    
+
     def __init__(
         self, protocol="TCP", ip=['172.31.111.35'], port=[6000, 6001], step_size=100000, app_path="../", log_debug=False, spk_print=False,
     ):
@@ -208,105 +213,6 @@ class darwin3_device(object):
         if self.deploy_from_east:
             self.__transmit_flit__(port=self.port[1], data_type=self.NORMAL_FLIT, fbin=self._cache_path / (dwnc_file+"_flitin_east.bin"))
         return
-        
-    def clear_neurons_states(self, ISC=False, LSC=False, clear=True, dwnc_file="clear_states"):
-        """
-        清理 darwin3 芯片内部神经拟态核心的状态量
-        Args:
-            ISC   (bool): inference status clear,
-                          推理状态中电流清零, 阈值和振荡电位复位, 1 有效
-                          相关配置寄存器: dedr_vth_keep, dedr_vth_gset, 
-                          global_vth, dedr_res_keep, global_res
-            LSC   (bool): learn status clear, 学习状态清零, 1 有效
-            clear (bool): 权重和清零, 膜电位复位, 1 有效
-                          相关配置寄存器:vt_rest
-                          
-            dwnc_file (str): 生成的配置文件名称
-        Returns:
-            None
-        """
-        # if not self.clear_state_had_started:
-        #     self._cached_clear_state=Path.read_bytes(self.app_path / 'deploy_files' / 'clear_states_flitin.bin')
-        #     self.clear_state_had_started=True
-        
-        # 根据需要重置的内容生成指令
-        if CommandList.global_list.get('cls') is None: 
-            west_dwnc_list=CommandList(entry=WEST)
-            east_dwnc_list=CommandList(entry=EAST)
-
-            west_dwnc_list.append((PKG_CMD,0,1))
-            east_dwnc_list.append((PKG_CMD,0,1))
-
-            for _x,_y in self.model.used_neuron_cores.keys():
-                if _x <= 15: west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0b111)) # 清空
-                else:        east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0b111))
-
-            west_dwnc_list.extend(self.model.clear_is_west)
-            east_dwnc_list.extend(self.model.clear_is_east)
-            
-            for key,value in self.model.delay_neuron.items():
-                coord = eval(key)
-                if coord[0] <= 15:
-                    west_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
-                    west_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
-                else:
-                    east_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
-                    east_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
-
-            west_dwnc_list.append((PKG_CMD,0,0))
-            east_dwnc_list.append((PKG_CMD,0,0))
-
-            CommandList.global_list['cls']=(west_dwnc_list,east_dwnc_list)
-        else:
-            west_dwnc_list,east_dwnc_list=CommandList.global_list['cls']
-
-        # send
-        self._transmit_flit(port=self.port[0], 
-            data_type=self.NORMAL_FLIT,
-            # flit_bin=self._cached_clear_state,
-            flit_bin=west_dwnc_list.encode(),
-            recv=False,
-            recv_run_flit_file=None)
-        return
-    
-    # new part
-    def _gen_deploy_flitin(self):
-        """
-        *-*-config.dwnc => deploy_input.dwnc
-        Args:
-            deploy_input_dwnc_file (str): 生成的 dwnc 文件的名称
-        Returns:
-            None
-        """
-        # 东西向传输
-        west_dwnc_list=CommandList(entry=WEST)
-        east_dwnc_list=CommandList(entry=EAST)
-
-        for _cmd_list in self.model.used_neuron_cores.values():
-            if _cmd_list.entry==WEST: west_dwnc_list.extend(_cmd_list)
-            if _cmd_list.entry==EAST: east_dwnc_list.extend(_cmd_list)
-
-        # 加入开启/停止tik控制对 => 代表配置结束
-        west_dwnc_list.append((PKG_CMD,0,1))
-        west_dwnc_list.append((PKG_CMD,0,0))
-
-        east_dwnc_list.append((PKG_CMD,0,1))
-        east_dwnc_list.append((PKG_CMD,0,0))
-
-        # 设置hardware_step_size
-        west_dwnc_list.append((PKG_CMD,0b100000,self.hardware_step_size))
-        east_dwnc_list.append((PKG_CMD,0b100000,self.hardware_step_size))
-
-        # 清除神经元推理状态和权重和
-        for _x,_y in self.model.used_neuron_cores.keys():
-            if _x <= 15:
-                west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x5)) # 清空
-                west_dwnc_list.append((PKG_WRITE,_x,_y,0x15,0x1)) # 使能
-            else:
-                east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x5))
-                east_dwnc_list.append((PKG_WRITE,_x,_y,0x15,0x1))
-
-        return west_dwnc_list,east_dwnc_list
 
     def reset(self):
         """
@@ -350,39 +256,21 @@ class darwin3_device(object):
         """
         trans = Transmitter()
         trans.connect_lwip((self.ip, port))
-        # print("===<1>=== tcp connect succeed")
-        # start_time = time.time_ns()
+
         match data_type:
-            case darwin3_device.CHIP_RESET:
-                send_bytes = bytearray()
-                send_bytes += struct.pack('II', 0x0000,data_type)
-                trans.socket_inst.sendall(send_bytes)
+            case darwin3_device.FlitType.CHIP_RESET:
+                trans.socket_inst.sendall(struct.pack('II', 0x0000,data_type))
                 print("===<2>=== reset succeed")
-            case darwin3_device.SET_FREQUENCY:
-                send_bytes = bytearray()
-                send_bytes += struct.pack('II', 333,data_type)
-                trans.socket_inst.sendall(send_bytes)
+            case darwin3_device.FlitType.SET_FREQUENCY:
+                trans.socket_inst.sendall(struct.pack('II', 333,data_type))
                 print("===<2>=== set frequency succeed")
             case _ :
-                trans.send_flit_bin_without_file(flit_bin, data_type)
-                # print("===<2>=== send succeed")
-        # end_time = time.time_ns()
-        # print('===<3>=== tcp sent elapsed : %.3f ms' % ((end_time - start_time)/1000000))
+                trans.send_flit_bin(flit_bin, data_type)
 
-        fout = BytesIO()
-        if recv:
-            data_len=0
-            while True:
-                request = trans.socket_inst.recv(10240)
-                if not request: break # 无数据时退出
-                data_len += len(request)
-                fout.write(request)
-            if data_len % 4 !=0:
-                print(f"received data is not intact (with {len})!")
-        if recv_run_flit_file is not None:
-            recv_run_flit_file.write_bytes(fout.getvalue())
-
+        if recv: fout=trans.recv(recv_run_flit_file)
+        else: fout=BytesIO()
         trans.close()
+
         return fout
 
     def _gen_spike_input_dwnc(
@@ -418,7 +306,7 @@ class darwin3_device(object):
 
         return dwnc_list
 
-    def _excute_dwnc_command(self,dwnc_list,direction,saving_name='',recv=True,saving_recv=False) -> list:
+    def _excute_dwnc_command(self,dwnc_list,direction,type,saving_name='',recv=True,saving_recv=False) -> list:
         if isinstance(dwnc_list,CommandList):
             bin_io_rslt=dwnc_list.encode()
         else:
@@ -426,12 +314,105 @@ class darwin3_device(object):
         # send
         # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
         rslt = self._transmit_flit(port=self.port[0], 
-                            data_type=self.NORMAL_FLIT,
+                            data_type=type,
                             flit_bin=bin_io_rslt,
                             recv=recv,
                             recv_run_flit_file=None if not saving_recv else self._cache_path / f"recv_{saving_name}.txt")
         max_tik_index,rslt = decode(rslt)
         return max_tik_index,rslt
+        
+    def clear_neurons_states(self, ISC=False, LSC=False, clear=True, dwnc_file="clear_states"):
+        """
+        清理 darwin3 芯片内部神经拟态核心的状态量
+        Args:
+            ISC   (bool): inference status clear,
+                          推理状态中电流清零, 阈值和振荡电位复位, 1 有效
+                          相关配置寄存器: dedr_vth_keep, dedr_vth_gset, 
+                          global_vth, dedr_res_keep, global_res
+            LSC   (bool): learn status clear, 学习状态清零, 1 有效
+            clear (bool): 权重和清零, 膜电位复位, 1 有效
+                          相关配置寄存器:vt_rest
+                          
+            dwnc_file (str): 生成的配置文件名称
+        Returns:
+            None
+        """
+        # 根据需要重置的内容生成指令
+        if CommandList.global_list.get('cls') is None: 
+            west_dwnc_list=CommandList(entry=WEST)
+            east_dwnc_list=CommandList(entry=EAST)
+
+            west_dwnc_list.append((PKG_CMD,0,1))
+            east_dwnc_list.append((PKG_CMD,0,1))
+
+            for _x,_y in self.model.used_neuron_cores.keys():
+                if _x <= 15: west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0b111)) # 清空
+                else:        east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0b111))
+
+            west_dwnc_list.extend(self.model.clear_is_west)
+            east_dwnc_list.extend(self.model.clear_is_east)
+            
+            for key,value in self.model.delay_neuron.items():
+                coord = eval(key)
+                if coord[0] <= 15:
+                    west_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
+                    west_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
+                else:
+                    east_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
+                    east_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
+
+            west_dwnc_list.append((PKG_CMD,0,0))
+            east_dwnc_list.append((PKG_CMD,0,0))
+
+            CommandList.global_list['cls']=(west_dwnc_list,east_dwnc_list)
+        else:
+            west_dwnc_list,east_dwnc_list=CommandList.global_list['cls']
+
+        # send
+        self._transmit_flit(port=self.port[0], 
+            data_type=FlitType.CLEAR_STATE,
+            flit_bin=west_dwnc_list.encode(),
+            recv=False,
+            recv_run_flit_file=None)
+        return
+
+    def _gen_deploy_flitin(self):
+        """
+        *-*-config.dwnc => deploy_input.dwnc
+        Args:
+            deploy_input_dwnc_file (str): 生成的 dwnc 文件的名称
+        Returns:
+            None
+        """
+        # 东西向传输
+        west_dwnc_list=CommandList(entry=WEST)
+        east_dwnc_list=CommandList(entry=EAST)
+
+        for _cmd_list in self.model.used_neuron_cores.values():
+            if _cmd_list.entry==WEST: west_dwnc_list.extend(_cmd_list)
+            if _cmd_list.entry==EAST: east_dwnc_list.extend(_cmd_list)
+
+        # 加入开启/停止tik控制对 => 代表配置结束
+        west_dwnc_list.append((PKG_CMD,0,1))
+        west_dwnc_list.append((PKG_CMD,0,0))
+
+        east_dwnc_list.append((PKG_CMD,0,1))
+        east_dwnc_list.append((PKG_CMD,0,0))
+
+        # 设置hardware_step_size
+        west_dwnc_list.append((PKG_CMD,0b100000,self.hardware_step_size))
+        east_dwnc_list.append((PKG_CMD,0b100000,self.hardware_step_size))
+
+        # 清除神经元推理状态和权重和
+        for _x,_y in self.model.used_neuron_cores.keys():
+            if _x <= 15:
+                west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x5)) # 清空
+                west_dwnc_list.append((PKG_WRITE,_x,_y,0x15,0x1)) # 使能
+            else:
+                east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x5))
+                east_dwnc_list.append((PKG_WRITE,_x,_y,0x15,0x1))
+
+        return west_dwnc_list,east_dwnc_list
 
     def deploy_config(self):
         """
@@ -442,7 +423,7 @@ class darwin3_device(object):
             None
         """
         dwnc_west,dwnc_east=self._gen_deploy_flitin()
-        self._excute_dwnc_command(dwnc_west,WEST,'deploy',recv=False)
+        self._excute_dwnc_command(dwnc_west,WEST,'deploy',type=FlitType.NORMAL_FLIT,recv=False)
         # self._excute_dwnc_command(dwnc_east,EAST,'deploy',recv=False)
 
     def run_darwin3_withoutfile(self,spike_neurons):
@@ -479,6 +460,7 @@ class darwin3_device(object):
         max_tik_index,rslt=self._excute_dwnc_command(
             dwnc_list,
             WEST,
+            FlitType.NORMAL_FLIT,
             'run_flitin',
             True,
             saving_recv)
@@ -510,6 +492,7 @@ class darwin3_device(object):
         max_tik_index,rslt=self._excute_dwnc_command(
             dwnc_list,
             WEST,
+            FlitType.NORMAL_FLIT,
             'run_flitin',
             True,
             saving_recv)
