@@ -14,7 +14,7 @@ class SpikeResult():
         for _result in recvs:
             if _result.type==TYPE_SPIKE_RESULT:
                 index = (_result.x,_result.y,_result.dedr_id)
-                for _file_name,_neuron_index_json in neuron_id_json_list:
+                for _file_name,_neuron_index_json in neuron_id_json_list.items():
                     _info=_neuron_index_json.get(index)
                     if _info is not None: rslt[_result.tik].append((_file_name,_info))
         return rslt
