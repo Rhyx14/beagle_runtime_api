@@ -25,8 +25,8 @@ class FlitType():
     CHIP_RESET = 10
     SET_FREQUENCY = 11
     NORMAL_FLIT = 0x8000
-    CLEAR_STATE = 0x8000
-    RESET_SPIKING_INPUT= 0x8000
+    CLEAR_STATE = 0x8001
+    RESET_SPIKING_INPUT= 0x8002
 
 class darwin3_device(object):
     """
@@ -222,7 +222,7 @@ class darwin3_device(object):
         Returns:
             None
         """
-        self._transmit_flit(port=self.port[0], data_type=darwin3_device.CHIP_RESET)
+        self._transmit_flit(port=self.port[0], data_type=FlitType.CHIP_RESET)
         print("Please check the information on the Darwin3 development board ")
         print("to determine if the configuration was successful.")
         return
@@ -235,7 +235,7 @@ class darwin3_device(object):
         Returns:
             None
         """
-        self._transmit_flit(port=self.port[0], data_type=darwin3_device.SET_FREQUENCY)
+        self._transmit_flit(port=self.port[0], data_type=FlitType.SET_FREQUENCY)
         print("Please check the information on the Darwin3 development board ")
         print("to determine if the configuration was successful.")
         return
@@ -258,10 +258,10 @@ class darwin3_device(object):
         trans.connect_lwip((self.ip, port))
 
         match data_type:
-            case darwin3_device.FlitType.CHIP_RESET:
+            case FlitType.CHIP_RESET:
                 trans.socket_inst.sendall(struct.pack('II', 0x0000,data_type))
                 print("===<2>=== reset succeed")
-            case darwin3_device.FlitType.SET_FREQUENCY:
+            case FlitType.SET_FREQUENCY:
                 trans.socket_inst.sendall(struct.pack('II', 333,data_type))
                 print("===<2>=== set frequency succeed")
             case _ :
@@ -423,7 +423,7 @@ class darwin3_device(object):
             None
         """
         dwnc_west,dwnc_east=self._gen_deploy_flitin()
-        self._excute_dwnc_command(dwnc_west,WEST,'deploy',type=FlitType.NORMAL_FLIT,recv=False)
+        self._excute_dwnc_command(dwnc_west,WEST,FlitType.NORMAL_FLIT,'deploy',recv=False)
         # self._excute_dwnc_command(dwnc_east,EAST,'deploy',recv=False)
 
     def run_darwin3_withoutfile(self,spike_neurons):
@@ -467,7 +467,7 @@ class darwin3_device(object):
 
         return SpikeResult.parse_spike(self.model.output_neuron_info_jsons,rslt,max_tik_index+1)
     
-    def run_with_torch_tensor(self,spike_tensor,output_layer_name,output_shape:tuple,extra_time_steps=0,saving_input=False,saving_recv=False,print_log=False):
+    def run_with_torch_tensor(self,spike_tensor,output_layer_name,output_shape:tuple,extra_time_steps=0,saving_input=False,saving_recv=False,print_log=False,clear_state=False):
         """
         接收应用给的 PyTorch Tensor
         Args:
@@ -492,10 +492,10 @@ class darwin3_device(object):
         max_tik_index,rslt=self._excute_dwnc_command(
             dwnc_list,
             WEST,
-            FlitType.NORMAL_FLIT,
+            FlitType.RESET_SPIKING_INPUT if clear_state else FlitType.NORMAL_FLIT,
             'run_flitin',
             True,
-            saving_recv)
+            saving_recv)            
 
         rslt=SpikeResult.parse_spike_single_layer(self.model.output_neuron_info_jsons[output_layer_name],rslt,max_tik_index+1)
         
