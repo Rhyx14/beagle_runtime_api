@@ -1,4 +1,0 @@
-~/scripts/chip_reset
-/sbin/insmod ~/drivers/xilinx-axidma.ko
-chmod a+r /dev/axidma
-chmod a+w /dev/axidma
