@@ -4,6 +4,7 @@ import logging,os,json,glob,re,struct,time
 from io import StringIO,BytesIO
 from pathlib import Path
 from enum import Enum
+from functools import reduce
 
 from .compiler_model import CompilerModel
 
@@ -442,7 +443,7 @@ class darwin3_device(object):
 
         return SpikeResult.parse_spike(self.model.output_neuron_info_jsons,rslt,max_tik_index+1)
     
-    def run_with_torch_tensor(self,spike_tensor,output_layer_name,output_shape:tuple,extra_time_steps=0,saving_input=False,saving_recv=False,print_log=False,clear_state=False):
+    def run_with_torch_tensor(self,spike_tensor,output_layer_name,expect_output_shape:tuple,extra_time_steps=0,saving_input=False,saving_recv=False,print_log=False,clear_state=False):
         """
         接收应用给的 PyTorch Tensor
         Args:
@@ -450,14 +451,14 @@ class darwin3_device(object):
         Returns:
             result tensor: in [t x] 本次运行结束时硬件返回给应用的脉冲
         """
-
+        if len(spike_tensor.shape) >2:
+            spike_tensor=spike_tensor.flatten(1)
         t,_=spike_tensor.shape
         spike_list=[]
         for _i in range(t):
             spike_list.append(torch.where(spike_tensor[_i]==1)[0].tolist())
         
         for _ in range(extra_time_steps): spike_list.append([])
-
 
         # 生成spike的dwnc
         dwnc_list=self._gen_spike_input_dwnc(spike_list)
@@ -474,13 +475,16 @@ class darwin3_device(object):
 
         rslt=SpikeResult.parse_spike_single_layer(self.model.output_neuron_info_jsons[output_layer_name],rslt,max_tik_index+1)
         
-        target_t,target_x=output_shape
+        target_t = expect_output_shape[0]
+        target_x = reduce(lambda x,y : x*y, expect_output_shape[1:],1)
+        # target_t,target_x=expect_output_shape
         output_spike=torch.zeros(target_t,target_x)
         rslt=rslt[-target_t:]
         for _t,_spike_ids in enumerate(rslt):
+            if len(_spike_ids)==0: continue
             output_spike[_t,torch.tensor(_spike_ids)]=1
         
-        return output_spike
+        return output_spike.view(*expect_output_shape)
 
     def dump_memory(self,dump_request:list[tuple],log=False,saving_intermediate_dir: Path | None =None) -> tuple[list]:
         '''
