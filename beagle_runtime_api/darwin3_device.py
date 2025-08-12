@@ -35,7 +35,7 @@ class darwin3_device(object):
     """
 
     def __init__(
-        self, protocol="TCP", ip=['172.31.111.35'], port=[6000, 6001], step_size=100000, app_path="../", log_debug=False, spk_print=False,
+        self, protocol="TCP", ip=['172.31.111.35'], port=[6000, 6001], step_size=100000, app_path:Path="../", log_debug=False, spk_print=False,
     ):
         """
         
@@ -199,8 +199,7 @@ class darwin3_device(object):
             None
         """
         self._transmit_flit(port=self.port[0], data_type=FlitType.CHIP_RESET)
-        print("Please check the information on the Darwin3 development board ")
-        print("to determine if the configuration was successful.")
+        print("Please check the output on the Darwin3 development board.")
         return
     
     def darwin3_init(self, freq=333):
@@ -212,8 +211,7 @@ class darwin3_device(object):
             None
         """
         self._transmit_flit(port=self.port[0], data_type=FlitType.SET_FREQUENCY)
-        print("Please check the information on the Darwin3 development board ")
-        print("to determine if the configuration was successful.")
+        print("Please check the output on the Darwin3 development board.")
         return
     
     def _transmit_flit(self, port, data_type, flit_bin:bytearray=b'', recv=False, recv_run_flit_file : Path=None) -> BytesIO:
@@ -236,10 +234,10 @@ class darwin3_device(object):
         match data_type:
             case FlitType.CHIP_RESET:
                 trans.socket_inst.sendall(struct.pack('II', 0x0000,data_type))
-                print("===<2>=== reset succeed")
+                print("[control] reset succeed")
             case FlitType.SET_FREQUENCY:
                 trans.socket_inst.sendall(struct.pack('II', 333,data_type))
-                print("===<2>=== set frequency succeed")
+                print("[control] set frequency succeed")
             case _ :
                 trans.send_flit_bin(flit_bin, data_type)
 
@@ -282,20 +280,21 @@ class darwin3_device(object):
 
         return dwnc_list
 
-    def _excute_dwnc_command(self,dwnc_list,direction,type,saving_name='',recv=True,saving_recv=False) -> list:
+    def _excute_dwnc_command(self,dwnc_list,direction,type,saving_name='',recv=True,saving_recv=False) -> list | None:
         if isinstance(dwnc_list,CommandList):
             bin_io_rslt=dwnc_list.encode()
         else:
             bin_io_rslt=encode(dwnc_list,direction)
         # send
         # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
-        rslt = self._transmit_flit(port=self.port[0], 
+        rslt = self._transmit_flit(port=self.port[0] if direction==WEST else self.port[1], 
                             data_type=type,
                             flit_bin=bin_io_rslt,
                             recv=recv,
                             recv_run_flit_file=None if not saving_recv else self._cache_path / f"recv_{saving_name}.txt")
-        max_tik_index,rslt = decode(rslt)
-        return max_tik_index,rslt
+        if recv:
+            max_tik_index,rslt = decode(rslt)
+            return max_tik_index,rslt
         
     def clear_neurons_states(self, ISC=False, LSC=False, clear=True, dwnc_file="clear_states"):
         """
@@ -344,12 +343,14 @@ class darwin3_device(object):
         else:
             west_dwnc_list,east_dwnc_list=CommandList.global_list['cls']
 
+        self._excute_dwnc_command(west_dwnc_list,WEST,FlitType.NORMAL_FLIT,'cls_west',recv=False,saving_recv=True)
+        self._excute_dwnc_command(east_dwnc_list,EAST,FlitType.NORMAL_FLIT,'cls_east',recv=False,saving_recv=True)
         # send
-        self._transmit_flit(port=self.port[0], 
-            data_type=FlitType.CLEAR_STATE,
-            flit_bin=west_dwnc_list.encode(),
-            recv=False,
-            recv_run_flit_file=None)
+        # self._transmit_flit(port=self.port[0], 
+        #     data_type=FlitType.CLEAR_STATE,
+        #     flit_bin=west_dwnc_list.encode(),
+        #     recv=False,
+        #     recv_run_flit_file=None)   
         return
 
     def _gen_deploy_flitin(self):
@@ -399,7 +400,8 @@ class darwin3_device(object):
             None
         """
         dwnc_west,dwnc_east=self._gen_deploy_flitin()
-        self._excute_dwnc_command(dwnc_west,WEST,FlitType.NORMAL_FLIT,'deploy',recv=False)
+        self._excute_dwnc_command(dwnc_west,WEST,FlitType.NORMAL_FLIT,'deploy_west',recv=True)
+        self._excute_dwnc_command(dwnc_east,EAST,FlitType.NORMAL_FLIT,'deploy_east',recv=True)
         # self._excute_dwnc_command(dwnc_east,EAST,'deploy',recv=False)
 
     def run_darwin3_withoutfile(self,spike_neurons):
