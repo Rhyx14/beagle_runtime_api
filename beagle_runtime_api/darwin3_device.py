@@ -13,9 +13,8 @@ from .tcp_transmitter import Transmitter
 from .darwin_flit.decode import decode
 from .darwin_flit.encode import encode
 from .darwin_flit.result import SpikeResult
-from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,WEST,EAST
+from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,PKG_READ,WEST,EAST
 from .darwin_flit.command_list import CommandList
-from x_secretary.utils.time import measure_time
 
 try: 
     import torch
@@ -35,7 +34,14 @@ class darwin3_device(object):
     """
 
     def __init__(
-        self, protocol="TCP", ip=['172.31.111.35'], port=[6000, 6001], step_size=100000, app_path:Path="../", log_debug=False, spk_print=False,
+        self, 
+        protocol="TCP", 
+        ip=['172.31.111.35'], 
+        port=[6000, 6001], 
+        step_size=100000, 
+        app_path:Path="../", 
+        log_debug=False, 
+        **kwds,
     ):
         """
         
@@ -100,94 +106,6 @@ class darwin3_device(object):
         self.clear_state_had_started = False
 
         self.model=CompilerModel(self.app_path / "config_files")
-        return
-
-    def enable_neurons(self, dwnc_file="enable"):
-        """
-        将 config_files 中所有需要使用的神经元使能
-        Args:
-            dwnc_file (str): 生成的配置文件名称
-        Returns:
-            None
-        """
-        raise NotImplementedError
-        # 生成 dwnc 文件
-        with open(self._cache_path / (dwnc_file + ".dwnc"), "w+") as fwest, \
-        open(self._cache_path / (dwnc_file + "_east.dwnc"), "w+") as feast:
-            fwest.write('0 cmd 0xc0000001\n')
-            feast.write('0 cmd 0xc0000001\n')
-            for neuron in self._config_neuron_coord_list:
-                if int(neuron[0]) <= 15:
-                    fwest.write(f"0 write {neuron[0]} {neuron[1]} 0x15 0x1\n")
-                else:
-                    self.deploy_from_east = True
-                    feast.write(f"0 write {neuron[0]} {neuron[1]} 0x15 0x1\n")
-            fwest.write('0 cmd 0xc0000000\n')
-            feast.write('0 cmd 0xc0000000\n')
-        if self.deploy_from_east == False:
-            os.remove(self._cache_path / (dwnc_file + "_east.dwnc"))
-        
-        # 生成 flit 文件
-        self.__flit_gen__(
-            type="deploy",
-            input_file=dwnc_file+".dwnc",
-            output_file=dwnc_file+"_flitin",
-        )
-        if self.deploy_from_east:
-            self.__flit_gen_east__(
-                type="deploy",
-            input_file=dwnc_file+"_east.dwnc",
-            output_file=dwnc_file+"_flitin_east",
-            )
-            
-        # 发送 flit 包到 Darwin3 板卡
-        self.__transmit_flit__(port=self.port[0], data_type=self.NORMAL_FLIT, fbin=self._cache_path / (dwnc_file + "_flitin.bin"))
-        if self.deploy_from_east:
-            self.__transmit_flit__(port=self.port[1], data_type=self.NORMAL_FLIT, fbin=self._cache_path / (dwnc_file + "_flitin_east.bin"))
-        return
-    
-    def disable_neurons(self, dwnc_file="disable"):
-        """
-        将 config_files 中所有需要使用的神经元取消使能
-        Args:
-            dwnc_file (str): 生成的配置文件名称
-        Returns:
-            None
-        """
-        raise NotImplementedError
-        # 生成 dwnc 文件
-        with open(self._cache_path / (dwnc_file + ".dwnc"), "w+") as fwest, \
-        open(self._cache_path / (dwnc_file + "_east.dwnc"), "w+") as feast:
-            fwest.write('0 cmd 0xc0000001\n')
-            feast.write('0 cmd 0xc0000001\n')
-            for neuron in self._config_neuron_coord_list:
-                if int(neuron[0]) <= 15:
-                    fwest.write(f"0 write {neuron[0]} {neuron[1]} 0x15 0x1\n")
-                else:
-                    self.deploy_from_east = True
-                    feast.write(f"0 write {neuron[0]} {neuron[1]} 0x15 0x1\n")
-            fwest.write('0 cmd 0xc0000000\n')
-            feast.write('0 cmd 0xc0000000\n')
-        if self.deploy_from_east == False:
-            os.remove(self._cache_path + dwnc_file + "_east.dwnc")
-            
-        # 生成 flit 文件
-        self.__flit_gen__(
-            type="deploy",
-            input_file=dwnc_file  + ".dwnc",
-            output_file=dwnc_file + "_flitin",
-        )
-        if self.deploy_from_east:
-            self.__flit_gen_east__(
-                type="deploy",
-            input_file=dwnc_file+"_east.dwnc",
-            output_file=dwnc_file+"_flitin_east",
-            )
-            
-        # 发送 flit 包到 Darwin3 板卡
-        self.__transmit_flit__(port=self.port[0], data_type=self.NORMAL_FLIT, fbin=self._cache_path / (dwnc_file+"_flitin.bin"))
-        if self.deploy_from_east:
-            self.__transmit_flit__(port=self.port[1], data_type=self.NORMAL_FLIT, fbin=self._cache_path / (dwnc_file+"_flitin_east.bin"))
         return
 
     def reset(self):
@@ -343,8 +261,8 @@ class darwin3_device(object):
         else:
             west_dwnc_list,east_dwnc_list=CommandList.global_list['cls']
 
-        self._excute_dwnc_command(west_dwnc_list,WEST,FlitType.NORMAL_FLIT,'cls_west',recv=False,saving_recv=True)
-        self._excute_dwnc_command(east_dwnc_list,EAST,FlitType.NORMAL_FLIT,'cls_east',recv=False,saving_recv=True)
+        self._excute_dwnc_command(west_dwnc_list,WEST,FlitType.NORMAL_FLIT,'cls_west',recv=False,saving_recv=False)
+        self._excute_dwnc_command(east_dwnc_list,EAST,FlitType.NORMAL_FLIT,'cls_east',recv=False,saving_recv=False)
         # send
         # self._transmit_flit(port=self.port[0], 
         #     data_type=FlitType.CLEAR_STATE,
@@ -488,7 +406,7 @@ class darwin3_device(object):
         
         return output_spike.view(*expect_output_shape)
 
-    def dump_memory(self,dump_request:list[tuple],log=False,saving_intermediate_dir: Path | None =None) -> tuple[list]:
+    def dump_memory(self,dump_request:list[tuple]) -> tuple[list]:
         '''
         dump the memory of the specific neuromorphic core.
         ---
@@ -510,11 +428,13 @@ class darwin3_device(object):
 
         @saving_dwnc_path: saving intermediate files
         '''
-        raise NotImplementedError
+        # raise NotImplementedError
         # construct dwnc list
-        east_cmds=['0 cmd 0xc0000001\n']
-        west_cmds=['0 cmd 0xc0000001\n']
+        west_dwnc_list=CommandList(entry=WEST)
+        east_dwnc_list=CommandList(entry=EAST)
 
+        west_dwnc_list.append((PKG_CMD,0,1))
+        east_dwnc_list.append((PKG_CMD,0,1))
         # x,y=nc_position
         for (_x,_y), _length, _offset, _inverse in dump_request:
             if _inverse:
@@ -523,43 +443,25 @@ class darwin3_device(object):
                 _addr_iter=range(_offset,_offset+_length)
 
             for _2_addr in _addr_iter:
-                cmd = f"0 read {_x} {_y} {hex(_2_addr)} 1\n"
+                _cmd=(PKG_READ,_x,_y,_2_addr)
+                # cmd = f"0 read {_x} {_y} {hex(_2_addr)} 1\n"
                 if _x>=15:
-                    east_cmds.append(cmd)
+                    east_dwnc_list.append(_cmd)
                 else:
-                    west_cmds.append(cmd)
+                    west_dwnc_list.append(_cmd)
 
-        east_cmds.append('0 cmd 0xc0000000\n')
-        west_cmds.append('0 cmd 0xc0000000\n')
+        west_dwnc_list.append((PKG_CMD,0,0))
+        east_dwnc_list.append((PKG_CMD,0,0))
         
-        rslt_west=None
-        rslt_east=None
-        if len(east_cmds)>2:
-            with open('get_nc_denrites_east.dwnc','w') as f:
-                f.writelines(east_cmds)
-            self.__flit_gen_east__(type="debug", input_file='get_nc_denrites_east.dwnc', output_file='get_nc_denrites_east_flitin')
-            self.__transmit_flit__(port=self.port[1], data_type=0x8000, 
-                                   fbin=self._cache_path+'get_nc_denrites_east_flitin.bin', 
-                                   recv=True, recv_run_flit_file="get_nc_denrites_east_recv",
-                                   debug=True)
-            rslt_east=parse_flit(recv_run_flit_file='get_nc_denrites_east_recv', log=log)
+        rslt_east= self._excute_dwnc_command(east_dwnc_list,EAST, FlitType.NORMAL_FLIT,
+            'get_nc_dendrites_east_filtin', recv=True, saving_recv=False)
 
-        if len(west_cmds)>2:
-            if saving_intermediate_dir is not None:
-                with open(saving_intermediate_dir/'get_nc_dendrites_west.dwnc','w') as f:
-                    f.writelines(west_cmds)
-
-            rslt_west= self._excute_dwnc_command(
-                west_cmds,
-                saving_intermediate_dir,
-                'get_nc_dendrites_west_filtin',
-                True if saving_intermediate_dir is not None else False,
-                True if saving_intermediate_dir is not None else False,
-                parser_log=log)
+        rslt_west= self._excute_dwnc_command(west_dwnc_list, WEST, FlitType.NORMAL_FLIT,
+            'get_nc_dendrites_west_filtin', recv=True, saving_recv=False)
             
         return rslt_east,rslt_west
     
-    def get_neuron_inference_status(self, nc_position:tuple,length:int,offset=0,log=False,saving_path: Path | None=None) -> tuple[list]:
+    def get_neuron_inference_status(self, nc_position:tuple,length:int,offset=0) -> tuple[list]:
         """
         获取推理存储器内容
         ---
@@ -572,10 +474,9 @@ class darwin3_device(object):
         Returns: 
             rslt_east,rslt_west
         """
-        return NotImplementedError
-        return self.dump_memory([(nc_position,length,0x0FFFF-offset,True)],log,saving_path)
+        return self.dump_memory([(nc_position,length,0x0FFFF-offset,True)])
     
-    def get_dendrites_memory(self, nc_position:tuple,length:int,offset=0,log=False,saving_path: Path | None=None) -> tuple[list]:
+    def get_dendrites_memory(self, nc_position:tuple,length:int,offset=0) -> tuple[list]:
         """
         获取树突存储器内容
         ---
@@ -588,10 +489,9 @@ class darwin3_device(object):
         Returns: 
             rslt_east,rslt_west
         """
-        raise NotImplementedError
-        return self.dump_memory([(nc_position,length,0x10000+offset,False)],log,saving_path)
+        return self.dump_memory([(nc_position,length,0x10000+offset,False)])
     
-    def get_learn_memory(self, nc_position:tuple,length:int,offset=0, log=False,saving_path: Path | None=None) -> tuple[list]:
+    def get_learn_memory(self, nc_position:tuple,length:int,offset=0) -> tuple[list]:
         """
         获取学习状态存储器内容
         ---
@@ -604,5 +504,4 @@ class darwin3_device(object):
         Returns: 
             rslt_east,rslt_west
         """
-        raise NotImplementedError
-        return self.dump_memory([(nc_position,length,0x1DFFF-offset,True)],log,saving_path)
+        return self.dump_memory([(nc_position,length,0x1DFFF-offset,True)])

@@ -48,16 +48,17 @@ class SpikeResult():
 #     def __str__(self) -> str:
 #         return f'{super().__str__()}, relay_link=0x{self.relay_link:02x}, data={self.data:018x}'
 
-# class MemResult(ResultBase):
-#     def __init__(self, tik, x, y, relay_link,addr,value) -> None:
-#         super().__init__('mem',tik, x, y)
-#         self.relay_link=relay_link
-#         self.addr=addr
-#         self.value=value
+class MemResult():
+    def __init__(self,raw_pkg) -> None:
+        self.type=TYPE_WRITE_RESULT
+        self.waddr=raw_pkg.waddr
+        self.x,self.y=decode_xy_single_board(raw_pkg)
+        self.data0=raw_pkg.wdata0
+        self.data1=raw_pkg.wdata1
 
-#     def __str__(self) -> str:
-#         width=32
-#         if self.addr>=0x800: width=16
-#         if self.addr>=0x4000: width=26
-#         if self.addr>=0x10000: width=48
-#         return f'{super().__str__()}, relay_link=0x{self.relay_link:02x}, addr=0x{self.addr:05x}, value=0x{self.value:0{width//4}x}'
+    def __str__(self) -> str:
+        width=32
+        if self.waddr>=0x800: width=16
+        if self.waddr>=0x4000: width=26
+        if self.waddr>=0x10000: width=48
+        return f'{super().__str__()}, relay_link=0x{self.relay_link:02x}, addr=0x{self.waddr:05x}, value=0x{self.value:0{width//4}x}'

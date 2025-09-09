@@ -2,7 +2,7 @@ from .flit import Head
 from .nc_pkgb import SpikePkg,WritePkg,CmdPkg,ReadPkg
 from .constant import PKG_FFLOW,PKG_FLOW,PKG_READ,PKG_REWARD,PKG_SHORT_REWARD,PKG_SHORT_SPIKE,PKG_SPIKE,PKG_WRITE
 from .constant import FLIT_TYPE_BODY,FLIT_TYPE_HEAD,FLIT_TYPE_CMD,FLIT_TYPE_TAIL
-from .result import SpikeResult
+from .result import SpikeResult,MemResult
 from io import BytesIO
 def decode(flits_buffer) -> list:
     """
@@ -28,8 +28,9 @@ def decode(flits_buffer) -> list:
         else:
             _pkg_class=hd.pkg_class
             if _pkg_class == PKG_WRITE:
-                _pkg=SpikePkg.from_buffer(mv,read_index)
+                _pkg=WritePkg.from_buffer(mv,read_index)
                 read_index += 16
+                rw_rslt.append(MemResult(_pkg))
 
             elif _pkg_class == PKG_READ:
                 _pkg=ReadPkg.from_buffer(mv,read_index)
