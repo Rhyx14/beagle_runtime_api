@@ -1,9 +1,7 @@
-import struct,os, glob, random, time, re, json, logging 
-import numpy as np
+import struct,os, json, logging, shutil
 import logging,os,json,glob,re,struct,time
 from io import StringIO,BytesIO
 from pathlib import Path
-from enum import Enum
 from functools import reduce
 
 from .compiler_model import CompilerModel
@@ -101,6 +99,10 @@ class darwin3_device(object):
 
         # 输入输出目录，包括临时缓存
         self._cache_path=self.app_path / 'beagle_cache'
+        if self._cache_path.exists():
+            print("[WARNING] removing previous cache folder")
+            shutil.rmtree(str(self._cache_path))
+
         Path.mkdir(self._cache_path,exist_ok=True,parents=True)
 
         self.clear_state_had_started = False
@@ -168,7 +170,7 @@ class darwin3_device(object):
     def _gen_spike_input_dwnc(
         self,
         neuron_spike_list: list,
-    ) -> list:
+    ) -> CommandList:
         """
         input_neuron.json && length of spike_neurons (list) => spikes.dwnc
         跟据spikes.dwnc以及config文件中提到的神经元，生成对应的run_input.dwnc文件
@@ -177,10 +179,17 @@ class darwin3_device(object):
         Returns:
             dwnc list
         """
-        dwnc_list=[(PKG_CMD,0,1)] # open time step
+        dwnc_list=CommandList([(PKG_CMD,0,1)]) # open time step
+        gap_spikes=0
         for _i in range(0, len(neuron_spike_list)):
-            dwnc_list.append((PKG_CMD,0b011000,0)) # step 1
             cur_spike_neuron_list = neuron_spike_list[_i]
+            
+            if len(cur_spike_neuron_list)==0:
+                gap_spikes+=1
+            else:
+                dwnc_list.append((PKG_CMD,0b011000,gap_spikes)) # step timestep
+                gap_spikes=0
+
             for spike_neuron in cur_spike_neuron_list:
                 neuron_info = self.model.input_neuron[str(spike_neuron)]
                 if len(neuron_info) > 0:
@@ -193,6 +202,8 @@ class darwin3_device(object):
                     for target in targets_list:
                         dwnc_list.append((PKG_SPIKE,target[0],target[1],neu_idx,target[2]))
             # dwnc_list.append((PKG_CMD,0b011000,0)) # step 1
+        if gap_spikes>0: # process tail empty spike list
+            dwnc_list.append((PKG_CMD,0b011000,gap_spikes-1))
 
         dwnc_list.append((PKG_CMD,0,0)) # turn off
 
@@ -214,7 +225,7 @@ class darwin3_device(object):
             max_tik_index,rslt = decode(rslt)
             return max_tik_index,rslt
         
-    def clear_neurons_states(self, ISC=False, LSC=False, clear=True, dwnc_file="clear_states"):
+    def clear_neurons_states(self, ISC=False, LSC=False, clear=True, dwnc_file=None):
         """
         清理 darwin3 芯片内部神经拟态核心的状态量
         Args:
@@ -226,12 +237,14 @@ class darwin3_device(object):
             clear (bool): 权重和清零, 膜电位复位, 1 有效
                           相关配置寄存器:vt_rest
                           
-            dwnc_file (str): 生成的配置文件名称
+            dwnc_file (str): 是否保存cls flit包, 非None保存
         Returns:
             None
         """
         # 根据需要重置的内容生成指令
         if CommandList.global_list.get('cls') is None: 
+            clear_type = int(''.join(str(int(b)) for b in [ISC, LSC, clear]), 2)
+
             west_dwnc_list=CommandList(entry=WEST)
             east_dwnc_list=CommandList(entry=EAST)
 
@@ -239,8 +252,8 @@ class darwin3_device(object):
             east_dwnc_list.append((PKG_CMD,0,1))
 
             for _x,_y in self.model.used_neuron_cores.keys():
-                if _x <= 15: west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0b111)) # 清空
-                else:        east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0b111))
+                if _x <= 15: west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,clear_type)) # 清空
+                else:        east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,clear_type))
 
             west_dwnc_list.extend(self.model.clear_is_west)
             east_dwnc_list.extend(self.model.clear_is_east)
@@ -258,17 +271,18 @@ class darwin3_device(object):
             east_dwnc_list.append((PKG_CMD,0,0))
 
             CommandList.global_list['cls']=(west_dwnc_list,east_dwnc_list)
+
+            if dwnc_file is not None:
+                west_dwnc_list.encode()
+                west_dwnc_list.save(self._cache_path / "west_cls.txt")
+                east_dwnc_list.encode()
+                east_dwnc_list.save(self._cache_path / "east_cls.txt")
         else:
             west_dwnc_list,east_dwnc_list=CommandList.global_list['cls']
 
         self._excute_dwnc_command(west_dwnc_list,WEST,FlitType.NORMAL_FLIT,'cls_west',recv=False,saving_recv=False)
         self._excute_dwnc_command(east_dwnc_list,EAST,FlitType.NORMAL_FLIT,'cls_east',recv=False,saving_recv=False)
-        # send
-        # self._transmit_flit(port=self.port[0], 
-        #     data_type=FlitType.CLEAR_STATE,
-        #     flit_bin=west_dwnc_list.encode(),
-        #     recv=False,
-        #     recv_run_flit_file=None)   
+
         return
 
     def _gen_deploy_flitin(self):
@@ -282,6 +296,13 @@ class darwin3_device(object):
         # 东西向传输
         west_dwnc_list=CommandList(entry=WEST)
         east_dwnc_list=CommandList(entry=EAST)
+
+        # 清除神经元推理状态和权重和
+        for _x,_y in self.model.used_neuron_cores.keys():
+            if _x <= 15: 
+                west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x5)) # 清空
+            else:
+                east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x5))
 
         for _cmd_list in self.model.used_neuron_cores.values():
             if _cmd_list.entry==WEST: west_dwnc_list.extend(_cmd_list)
@@ -301,15 +322,15 @@ class darwin3_device(object):
         # 清除神经元推理状态和权重和
         for _x,_y in self.model.used_neuron_cores.keys():
             if _x <= 15:
-                west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x5)) # 清空
                 west_dwnc_list.append((PKG_WRITE,_x,_y,0x15,0x1)) # 使能
+                west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x1)) # 清空
             else:
-                east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x5))
                 east_dwnc_list.append((PKG_WRITE,_x,_y,0x15,0x1))
+                east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,0x1))
 
         return west_dwnc_list,east_dwnc_list
 
-    def deploy_config(self):
+    def deploy_config(self,save=False):
         """
         在部署芯片上部署并使能相关核心, 同时清除神经元的相关状态
         Args:
@@ -318,6 +339,11 @@ class darwin3_device(object):
             None
         """
         dwnc_west,dwnc_east=self._gen_deploy_flitin()
+        if save:
+            dwnc_west.encode()
+            dwnc_west.save(self._cache_path / 'deploy_west.txt')
+            dwnc_east.encode()
+            dwnc_east.save(self._cache_path/ 'deploy_east.txt')
         self._excute_dwnc_command(dwnc_west,WEST,FlitType.NORMAL_FLIT,'deploy_west',recv=True)
         self._excute_dwnc_command(dwnc_east,EAST,FlitType.NORMAL_FLIT,'deploy_east',recv=True)
         # self._excute_dwnc_command(dwnc_east,EAST,'deploy',recv=False)
@@ -351,7 +377,8 @@ class darwin3_device(object):
         # 生成spike的dwnc
         dwnc_list=self._gen_spike_input_dwnc(spike_list)
         if saving_input:
-            (self._cache_path / 'run_input_dwnc.txt').write_text('\n'.join(dwnc_list))
+            dwnc_list.encode()
+            dwnc_list.save(self._cache_path / 'run_input_dwnc.txt')
 
         max_tik_index,rslt=self._excute_dwnc_command(
             dwnc_list,
