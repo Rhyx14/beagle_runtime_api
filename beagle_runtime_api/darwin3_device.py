@@ -37,7 +37,7 @@ class darwin3_device(object):
         ip=['172.31.111.35'], 
         port=[6000, 6001], 
         step_size=100000, 
-        app_path:Path="../", 
+        app_path:Path | str="../", 
         log_debug=False, 
         **kwds,
     ):
@@ -110,8 +110,21 @@ class darwin3_device(object):
         self.model=CompilerModel(self.app_path / "config_files")
         return
 
-    def reset(self):
+    def reset_freq(self,freq=333):
+        '''
+        复位硬件接口相关逻辑和硬件系统(darwin3 芯片, DMA 等), 重设时钟
+        Args: 
+            None
+        Returns:
+            None
+        '''
+        self._transmit_flit(port=self.port[0], data_type=FlitType.CHIP_RESET)
+        self._transmit_flit(port=self.port[0], data_type=FlitType.SET_FREQUENCY)
+        print("[INFO] Reset chip complete, please check the output on the Darwin3 development board.")
+
+    def reset(self,freq=333):
         """
+        [obsolete]
         复位硬件接口相关逻辑和硬件系统(darwin3 芯片, DMA 等)
         Args: 
             None
@@ -124,6 +137,7 @@ class darwin3_device(object):
     
     def darwin3_init(self, freq=333):
         """
+        [obsolete]
         按照指定频率配置 darwin3 芯片。
         Args:
             freq (int): 兼容参数，无实际作用
