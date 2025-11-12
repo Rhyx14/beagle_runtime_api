@@ -238,7 +238,63 @@ class darwin3_device(object):
         if recv:
             max_tik_index,rslt = decode(rslt)
             return max_tik_index,rslt
-        
+    def clear_vth_only(self, ISC=False, LSC=False, clear=True, dwnc_file=None):
+        """
+        清理 darwin3 芯片内部神经拟态核心的状态量
+        Args:
+            ISC   (bool): inference status clear,
+                          推理状态中电流清零, 阈值和振荡电位复位, 1 有效
+                          相关配置寄存器: dedr_vth_keep, dedr_vth_gset, 
+                          global_vth, dedr_res_keep, global_res
+            LSC   (bool): learn status clear, 学习状态清零, 1 有效
+            clear (bool): 权重和清零, 膜电位复位, 1 有效
+                          相关配置寄存器:vt_rest
+                          
+            dwnc_file (str): 是否保存cls flit包, 非None保存
+        Returns:
+            None
+        """
+        # 根据需要重置的内容生成指令
+        if CommandList.global_list.get('cls') is None: 
+            clear_type = int(''.join(str(int(b)) for b in [ISC, LSC, clear]), 2)
+
+            west_dwnc_list=CommandList(entry=WEST)
+            east_dwnc_list=CommandList(entry=EAST)
+
+            west_dwnc_list.append((PKG_CMD,0,1))
+            east_dwnc_list.append((PKG_CMD,0,1))
+
+            for _x,_y in self.model.used_neuron_cores.keys():
+                if _x <= 15: west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,clear_type)) # 清空
+                else:        east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,clear_type))
+            
+            for key,value in self.model.delay_neuron.items():
+                coord = eval(key)
+                if coord[0] <= 15:
+                    west_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
+                    west_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
+                else:
+                    east_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
+                    east_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
+
+            west_dwnc_list.append((PKG_CMD,0,0))
+            east_dwnc_list.append((PKG_CMD,0,0))
+
+            CommandList.global_list['cls']=(west_dwnc_list,east_dwnc_list)
+
+            if dwnc_file is not None:
+                west_dwnc_list.encode()
+                west_dwnc_list.save(self._cache_path / "west_cls.txt")
+                east_dwnc_list.encode()
+                east_dwnc_list.save(self._cache_path / "east_cls.txt")
+        else:
+            west_dwnc_list,east_dwnc_list=CommandList.global_list['cls']
+
+        self._excute_dwnc_command(west_dwnc_list,WEST,FlitType.NORMAL_FLIT,'cls_west',recv=False,saving_recv=False)
+        self._excute_dwnc_command(east_dwnc_list,EAST,FlitType.NORMAL_FLIT,'cls_east',recv=False,saving_recv=False)
+
+        return
+            
     def clear_neurons_states(self, ISC=False, LSC=False, clear=True, dwnc_file=None):
         """
         清理 darwin3 芯片内部神经拟态核心的状态量
@@ -297,6 +353,21 @@ class darwin3_device(object):
         self._excute_dwnc_command(west_dwnc_list,WEST,FlitType.NORMAL_FLIT,'cls_west',recv=False,saving_recv=False)
         self._excute_dwnc_command(east_dwnc_list,EAST,FlitType.NORMAL_FLIT,'cls_east',recv=False,saving_recv=False)
 
+        return
+    
+    def set_hardware_stepsize(self,hardware_stepsize):
+        '''
+        set hardware stepsize (cycles)
+        '''
+        self._hardware_step_size=hardware_stepsize
+        west_dwnc_list=CommandList([(PKG_CMD,0,1)],entry=WEST)
+        east_dwnc_list=CommandList([(PKG_CMD,0,1)],entry=EAST)
+        west_dwnc_list.append((PKG_CMD,0b100000,self._hardware_step_size))
+        west_dwnc_list.append((PKG_CMD,0b100000,self._hardware_step_size))
+        west_dwnc_list.append((PKG_CMD,0,0))
+        east_dwnc_list.append((PKG_CMD,0,0))
+        self._excute_dwnc_command(west_dwnc_list,WEST,FlitType.NORMAL_FLIT,'',recv=False)
+        self._excute_dwnc_command(east_dwnc_list,EAST,FlitType.NORMAL_FLIT,'',recv=False)
         return
 
     def _gen_deploy_flitin(self):
@@ -446,6 +517,135 @@ class darwin3_device(object):
             output_spike[_t,torch.tensor(_spike_ids)]=1
         
         return output_spike.view(*expect_output_shape)
+    
+    def _excute_dwnc_command_prof(self,secretary,dwnc_list,direction,type,saving_name='',recv=True,saving_recv=False) -> list | None:
+        with secretary.flame_time('compile spike'):
+            if isinstance(dwnc_list,CommandList):
+                bin_io_rslt=dwnc_list.encode()
+            else:
+                bin_io_rslt=encode(dwnc_list,direction)
+
+        # send
+        # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
+        with secretary.flame_time('hardware running'):
+            rslt = self._transmit_flit(port=self.port[0] if direction==WEST else self.port[1], 
+                                data_type=type,
+                                flit_bin=bin_io_rslt,
+                                recv=recv,
+                                recv_run_flit_file=None if not saving_recv else self._cache_path / f"recv_{saving_name}.txt")
+        if recv:
+            with secretary.flame_time('decompile spike'):
+                max_tik_index,rslt = decode(rslt)
+            return max_tik_index,rslt
+        
+    def run_with_torch_tensor_prof(self,secretary,spike_tensor,output_layer_name,expect_output_shape:tuple,extra_time_steps=0,saving_input=False,saving_recv=False,print_log=False,clear_state=False):
+        """
+        接收应用给的 PyTorch Tensor
+        Args:
+            spike_tensor: in [t x], 注意batch_size必须为1
+        Returns:
+            result tensor: in [t x] 本次运行结束时硬件返回给应用的脉冲
+        """
+        with secretary.flame_time('tensor to spikes'):
+            if len(spike_tensor.shape) >2:
+                spike_tensor=spike_tensor.flatten(1)
+            t,_=spike_tensor.shape
+            spike_list=[]
+            for _i in range(t):
+                spike_list.append(torch.where(spike_tensor[_i]==1)[0].tolist())
+
+            for _ in range(extra_time_steps): spike_list.append([])
+
+        # 生成spike的dwnc
+        with secretary.flame_time('spikes to flit'):
+            dwnc_list=self._gen_spike_input_dwnc(spike_list)
+            if saving_input:
+                (self._cache_path / 'run_input_dwnc.txt').write_text('\n'.join(dwnc_list))
+        with secretary.flame_time('send flit'):
+            max_tik_index,rslt=self._excute_dwnc_command_prof(
+                secretary,
+                dwnc_list,
+                WEST,
+                FlitType.RESET_SPIKING_INPUT if clear_state else FlitType.NORMAL_FLIT,
+                'run_flitin',
+                True,
+                saving_recv)            
+
+        with secretary.flame_time('flit to spikes'):
+            rslt=SpikeResult.parse_spike_single_layer(self.model.output_neuron_info_jsons[output_layer_name],rslt,max_tik_index+1)
+        
+        with secretary.flame_time('spikes to tensor'):
+            target_t = expect_output_shape[0]
+            target_x = reduce(lambda x,y : x*y, expect_output_shape[1:],1)
+            # target_t,target_x=expect_output_shape
+            output_spike=torch.zeros(target_t,target_x)
+            rslt=rslt[-target_t:]
+            for _t,_spike_ids in enumerate(rslt):
+                if len(_spike_ids)==0: continue
+                output_spike[_t,torch.tensor(_spike_ids)]=1
+        
+        return output_spike.view(*expect_output_shape)
+
+    def clear_neurons_states_prof(self,secretary, ISC=False, LSC=False, clear=True, dwnc_file=None):
+        """
+        清理 darwin3 芯片内部神经拟态核心的状态量
+        Args:
+            ISC   (bool): inference status clear,
+                          推理状态中电流清零, 阈值和振荡电位复位, 1 有效
+                          相关配置寄存器: dedr_vth_keep, dedr_vth_gset, 
+                          global_vth, dedr_res_keep, global_res
+            LSC   (bool): learn status clear, 学习状态清零, 1 有效
+            clear (bool): 权重和清零, 膜电位复位, 1 有效
+                          相关配置寄存器:vt_rest
+                          
+            dwnc_file (str): 是否保存cls flit包, 非None保存
+        Returns:
+            None
+        """
+        # 根据需要重置的内容生成指令
+        if CommandList.global_list.get('cls') is None: 
+            clear_type = int(''.join(str(int(b)) for b in [ISC, LSC, clear]), 2)
+
+            west_dwnc_list=CommandList(entry=WEST)
+            east_dwnc_list=CommandList(entry=EAST)
+
+            west_dwnc_list.append((PKG_CMD,0,1))
+            east_dwnc_list.append((PKG_CMD,0,1))
+
+            for _x,_y in self.model.used_neuron_cores.keys():
+                if _x <= 15: west_dwnc_list.append((PKG_WRITE,_x,_y,0x04,clear_type)) # 清空
+                else:        east_dwnc_list.append((PKG_WRITE,_x,_y,0x04,clear_type))
+
+            west_dwnc_list.extend(self.model.clear_is_west)
+            east_dwnc_list.extend(self.model.clear_is_east)
+            
+            for key,value in self.model.delay_neuron.items():
+                coord = eval(key)
+                if coord[0] <= 15:
+                    west_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
+                    west_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
+                else:
+                    east_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[0], value[1]))
+                    east_dwnc_list.append((PKG_WRITE,coord[0],coord[1],0x00800+value[2], value[3]))
+
+            west_dwnc_list.append((PKG_CMD,0,0))
+            east_dwnc_list.append((PKG_CMD,0,0))
+
+            CommandList.global_list['cls']=(west_dwnc_list,east_dwnc_list)
+
+            if dwnc_file is not None:
+                west_dwnc_list.encode()
+                west_dwnc_list.save(self._cache_path / "west_cls.txt")
+                east_dwnc_list.encode()
+                east_dwnc_list.save(self._cache_path / "east_cls.txt")
+        else:
+            west_dwnc_list,east_dwnc_list=CommandList.global_list['cls']
+            
+        with secretary.flame_time('re-init model'):
+            self._excute_dwnc_command_prof(secretary,west_dwnc_list,WEST,FlitType.NORMAL_FLIT,'cls_west',recv=False,saving_recv=False)
+            self._excute_dwnc_command_prof(secretary,east_dwnc_list,EAST,FlitType.NORMAL_FLIT,'cls_east',recv=False,saving_recv=False)
+
+        return
 
     def dump_memory(self,dump_request:list[tuple]) -> tuple[list]:
         '''
