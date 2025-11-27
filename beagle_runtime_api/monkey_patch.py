@@ -47,8 +47,7 @@ try:
         """
         self.__transmit_flit__(port=self.port[0], data_type=old_api_device.CHIP_RESET)
         self.__transmit_flit__(port=self.port[0], data_type=old_api_device.SET_FREQUENCY, freq=freq)
-        print("Please check the information on the Darwin3 development board ")
-        print("to determine if the configuration was successful.")
+        print("Please check the information on the Darwin3 development board to determine if the configuration was successful.")
         return
     old_api_device.reset_freq=reset_freq
 

@@ -1,5 +1,6 @@
 from .constant import TYPE_READ_RESULT,TYPE_SPIKE_RESULT,TYPE_WRITE_RESULT
 from .misc import decode_xy_single_board
+from collections import defaultdict
 class SpikeResult():
     __slots__='type','tik','x','y','dedr_id'
     def __init__(self,tik,raw_pkg) -> None:
@@ -61,4 +62,39 @@ class MemResult():
         if self.waddr>=0x800: width=16
         if self.waddr>=0x4000: width=26
         if self.waddr>=0x10000: width=48
-        return f'{super().__str__()}, relay_link=0x{self.relay_link:02x}, addr=0x{self.waddr:05x}, value=0x{self.value:0{width//4}x}'
+        return f'relay_link=0x{self.relay_link:02x}, addr=0x{self.waddr:05x}, value=0x{self.data0 + self.data1 * (1<<24):0{width//4}x}'
+    
+    @staticmethod
+    def parse_memory(recvs:list,sort=True):
+        rslt = defaultdict(list)
+        for _result in recvs:
+            if _result.type==TYPE_WRITE_RESULT:
+                rslt[(_result.x,_result.y)].append((_result.waddr,_result.data0+_result.data1*(1<<24)))
+        if sort:
+            for _key in rslt.keys():
+                rslt[_key].sort(key=lambda x:x[0])
+        return rslt
+    
+    @staticmethod
+    def parse_weight(recvs:list,bit_width):
+        max_unsigned = 1 << bit_width
+        threshold = 1 << (bit_width - 1)
+        def unsigned_to_signed(unsigned_val):
+            """
+            通用的无符号转有符号函数
+            """
+            # 判断是否超过有符号正数范围
+            if unsigned_val < threshold:
+                return unsigned_val
+            else:
+                return unsigned_val - max_unsigned
+        rslt = defaultdict(list)
+        for _result in recvs:
+            if _result.type==TYPE_WRITE_RESULT:
+                rslt[(_result.x,_result.y)].append((
+                    _result.waddr,
+                    unsigned_to_signed(((_result.data0+_result.data1*(1<<24))>>(48-bit_width)))
+                ))
+            for _key in rslt.keys():
+                rslt[_key].sort(key=lambda x:x[0])
+        return rslt
