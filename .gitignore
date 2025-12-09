@@ -10,3 +10,4 @@ dist/
 README.pdf
 test*
 archive/
+.ipynb_checkpoints/
