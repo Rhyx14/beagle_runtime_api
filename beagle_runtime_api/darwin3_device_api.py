@@ -19,7 +19,7 @@ try:
 except ImportError as e:
     print('PyTorch is not installed, ensure that no torch-API is used!')
 
-from .darwin3_device_func import gen_spike_input_dwnc,transmit_flit,gen_deploy_flitin,excute_dwnc_command
+from .darwin3_device_func import gen_spike_input_dwnc,transmit_flit,gen_deploy_flitin,excute_dwnc_command, excute_dwnc_command_prof
 
 class darwin3_device(object):
     """
@@ -377,26 +377,6 @@ class darwin3_device(object):
         
         return output_spike.view(*expect_output_shape)
     
-    def _excute_dwnc_command_prof(self,secretary,dwnc_list,direction,type,saving_name='',recv=True,saving_recv=False) -> list | None:
-        with secretary.flame_time('compile spike'):
-            if isinstance(dwnc_list,CommandList):
-                bin_io_rslt=dwnc_list.encode()
-            else:
-                bin_io_rslt=encode(dwnc_list,direction)
-
-        # send
-        # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
-        with secretary.flame_time('hardware running'):
-            rslt = transmit_flit(self.ip,port=self.port[0] if direction==WEST else self.port[1], 
-                                data_type=type,
-                                flit_bin=bin_io_rslt,
-                                recv=recv,
-                                recv_run_flit_file=None if not saving_recv else self._cache_path / f"recv_{saving_name}.txt")
-        if recv:
-            with secretary.flame_time('decompile spike'):
-                max_tik_index,rslt = decode(rslt)
-            return max_tik_index,rslt
-        
     def run_with_torch_tensor_prof(self,secretary,spike_tensor,output_layer_name,expect_output_shape:tuple,extra_time_steps=0,saving_input=False,saving_recv=False,clear_state=False):
         """
         接收应用给的 PyTorch Tensor
@@ -421,7 +401,7 @@ class darwin3_device(object):
             if saving_input:
                 (self._cache_path / 'run_input_dwnc.txt').write_text('\n'.join(dwnc_list))
         with secretary.flame_time('send flit'):
-            max_tik_index,rslt=self._excute_dwnc_command_prof(
+            max_tik_index,rslt=excute_dwnc_command_prof(self,
                 secretary,
                 dwnc_list,
                 WEST,
@@ -501,8 +481,8 @@ class darwin3_device(object):
             west_dwnc_list,east_dwnc_list=CommandList.global_list['cls']
             
         with secretary.flame_time('re-init model'):
-            self._excute_dwnc_command_prof(secretary,west_dwnc_list,WEST,FlitType.NORMAL_FLIT,'cls_west',recv=False,saving_recv=False)
-            self._excute_dwnc_command_prof(secretary,east_dwnc_list,EAST,FlitType.NORMAL_FLIT,'cls_east',recv=False,saving_recv=False)
+            excute_dwnc_command_prof(self,secretary,west_dwnc_list,WEST,FlitType.NORMAL_FLIT,'cls_west',recv=False,saving_recv=False)
+            excute_dwnc_command_prof(self,secretary,east_dwnc_list,EAST,FlitType.NORMAL_FLIT,'cls_east',recv=False,saving_recv=False)
 
         return
 

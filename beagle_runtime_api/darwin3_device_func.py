@@ -1,6 +1,5 @@
-import struct,os, json, logging, shutil
-import logging,os,json,glob,re,struct,time
-from io import StringIO,BytesIO
+import struct,struct
+from io import BytesIO
 from pathlib import Path
 from functools import reduce
 
@@ -10,7 +9,6 @@ from .tcp_transmitter import Transmitter
 
 from .darwin_flit.decode import decode
 from .darwin_flit.encode import encode
-from .darwin_flit.result import SpikeResult
 from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,PKG_READ,WEST,EAST
 from .darwin_flit.command_list import CommandList
 
@@ -150,3 +148,23 @@ def excute_dwnc_command(device,dwnc_list,direction,type,saving_name='',recv=True
     if recv:
         max_tik_index,rslt = decode(rslt)
         return max_tik_index,rslt
+    
+def excute_dwnc_command_prof(device,secretary,dwnc_list,direction,type,saving_name='',recv=True,saving_recv=False) -> list | None:
+    with secretary.flame_time('compile spike'):
+        if isinstance(dwnc_list,CommandList):
+            bin_io_rslt=dwnc_list.encode()
+        else:
+            bin_io_rslt=encode(dwnc_list,direction)
+    # send
+    # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
+    with secretary.flame_time('hardware running'):
+        rslt = transmit_flit(device.ip,device.port[0] if direction==WEST else device.port[1], 
+                            data_type=type,
+                            flit_bin=bin_io_rslt,
+                            recv=recv,
+                            recv_run_flit_file=None if not saving_recv else device._cache_path / f"recv_{saving_name}.txt")
+    if recv:
+        with secretary.flame_time('decompile spike'):
+            max_tik_index,rslt = decode(rslt)
+        return max_tik_index,rslt
+        

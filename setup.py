@@ -26,7 +26,10 @@ setup(
           'Programming Language :: Python', 'Intended Audience :: Developers',
           'Programming Language :: Python :: 3.11',
       ],
-      install_requires=['numpy'],
+      install_requires=[
+          'numpy',
+          'loguru',
+      ],
       # package_data={'': ['*.json']},
       author='H. Xu', # 作者
       description='Yet another tools for darwin3.', # 介绍
@@ -36,5 +39,5 @@ setup(
       # long_description=long_description, # 长介绍，在pypi项目页显示
       # long_description_content_type='text/markdown', # 长介绍使用的类型
       license='GPL', # 协议
-      python_requires='>=3.10'
+      python_requires='>=3.11'
     )
