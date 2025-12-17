@@ -31,8 +31,9 @@ setup(
           'loguru',
       ],
       # package_data={'': ['*.json']},
-      author='H. Xu', # 作者
-      description='Yet another tools for darwin3.', # 介绍
+      author='Rhyx', # 作者
+      author_email='xu_hn@outlook.com',
+      description='Yet another runtime api for darwin3.', # 介绍
     #   scripts=["script/uninstall_darwinos_node.sh"],
     #   data_files=list_files(Path("beagle_driver"), Path("beagle_driver")),
       # scripts=["script/restart_dma.sh", "script/init.sh"], 
