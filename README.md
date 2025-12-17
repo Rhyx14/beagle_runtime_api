@@ -1,3 +1,7 @@
 # beagle runtime api
 
-一套用于darwin3通信api接口
+一套用于darwin3通信api接口,
+
+注意本接口与darwin_runtime_api不完全兼容，需要自行确认兼容性。
+
+接口需要和beagle_runtime_server配合使用。接口与darwin_runtime_api的server不完全兼容，需要自行确认兼容性
