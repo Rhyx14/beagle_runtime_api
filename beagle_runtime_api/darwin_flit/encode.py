@@ -1,6 +1,6 @@
 import numpy as np
 from functools import reduce
-from .constant import WEST
+from ..dma_direction import WEST
 from .constant import PKG_CMD,PKG_READ,PKG_FLOW,PKG_SPIKE,PKG_WRITE
 from .nc_pkgb import CmdPkg,WritePkg,ReadPkg,SpikePkg
 

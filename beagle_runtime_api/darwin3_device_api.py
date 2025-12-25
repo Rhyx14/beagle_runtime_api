@@ -5,16 +5,20 @@ from functools import reduce
 from .compiler_model import CompilerModel
 
 from .darwin_flit.result import SpikeResult, MemResult
-from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,PKG_READ,WEST,EAST
+from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,PKG_READ
 from .darwin_flit.command_list import CommandList
-from .darwin3_device_func import FlitType
+
+from .dma_direction import WEST,EAST,NORTH,SOUTH
+from .flit_type import FlitType
+
 try: 
     import torch
 except ImportError as e:
     print('PyTorch is not installed, ensure that no torch-API is used!')
 
 from .deprecated import deprecated
-from .darwin3_device_func import gen_spike_input_dwnc,transmit_flit,gen_deploy_flitin,excute_dwnc_command, excute_dwnc_command_prof
+from .darwin3_device_func import gen_spike_input_dwnc,gen_deploy_flitin,excute_dwnc_command, excute_dwnc_command_prof
+from .transmitter import TCPTransmitter
 
 class darwin3_device(object):
     """
@@ -24,7 +28,6 @@ class darwin3_device(object):
     def __init__(
         self, 
         ip: str | tuple | list =['172.31.111.35'], 
-        port=[6000, 6001], 
         step_size=100000, 
         app_path:Path | str="../", 
         log_debug=False, 
@@ -32,18 +35,13 @@ class darwin3_device(object):
     ):
         """
         Args:
-            ip :              Darwin3 板卡设备 ip, [list | tuple] 为兼容api格式，不起作用
-            port (list(int)): 与 Darwin3 开发板通信使用的端口, 默认为 6000 和 6001
-                              其中 port[0] 为和 Darwin3 west 端 DMA 进行通信的端口
-                              port[0] 为和 Darwin3 east 端 DMA 进行通信的端口
-                              最多支持 4 个端口, 对面 DMA 的四个通道 (目前仅支持 2 个)
+            ip :              Darwin3 板卡设备 ip。[list | tuple] 为兼容api格式，不起作用
             step_size (int):  每个时间步维持的 FPGA 时钟周期数, 对应时长为 10ns * step_size * 2
-                              (汇编工具介绍与上位机通信流程中有换算关系，对应run_input.dwnc中最开始的配置)
             app_path (str):   模型文件的存储目录, 存储目录格式如下所示
             .
             └── app_path (name user-defined)
-                ├── beagle_cache # 临时缓存文件夹
-                └── config_files
+                ├── beagle_cache # 临时缓存文件夹，自动生成
+                └── config_files # 编译完成的darwin3 硬件部署信息
                     ├── 0-1-config.dwnc
                     ├── 0-1-ax.txt
                     ├── 0-1-de.txt
@@ -68,11 +66,9 @@ class darwin3_device(object):
         self.log_debug = log_debug
 
         # ip (str): 和 Darwin3 进行 TCP 连接的 IP 地址
-        # port (list(int)): 和 Darwin3 进行 TCP 连接的端口号序列
         if isinstance(ip,(list,tuple)):
             ip=ip[0]
-        self.ip = ip
-        self.port = port
+        self.transmitter=TCPTransmitter(ip,[None,6001,None,6000])
 
         # step_size (int): 时间步长度
         self._hardware_step_size = step_size
@@ -91,9 +87,10 @@ class darwin3_device(object):
         self.clear_state_had_started = False
 
         self.model=CompilerModel(self.app_path / "config_files")
+
         return
 
-    def reset_freq(self,freq=333):
+    def hardware_reset(self,freq=333):
         '''
         复位硬件接口相关逻辑和硬件系统(darwin3 芯片, DMA 等), 重设时钟
         Args: 
@@ -101,11 +98,11 @@ class darwin3_device(object):
         Returns:
             None
         '''
-        transmit_flit(self.ip,port=self.port[0], data_type=FlitType.CHIP_RESET)
-        transmit_flit(self.ip,port=self.port[0], data_type=FlitType.SET_FREQUENCY)
+        self.transmitter.transmit_flit(WEST, data_type=FlitType.CHIP_RESET)
+        self.transmitter.transmit_flit(WEST, data_type=FlitType.SET_FREQUENCY)
         print("[INFO] Reset chip complete, please check the output on the Darwin3 development board.")
 
-    @deprecated("此方法同darwin3_init()为旧版兼容API, 请使用 reset_freq(), 包含了reset和设置频率组合")
+    @deprecated("此方法同darwin3_init()为旧版兼容API, 请使用 hardware_reset(), 包含了reset和设置频率组合")
     def reset(self,freq=333):
         """
         复位硬件接口相关逻辑和硬件系统(darwin3 芯片, DMA 等)
@@ -114,11 +111,11 @@ class darwin3_device(object):
         Returns:
             None
         """
-        transmit_flit(self.ip,port=self.port[0], data_type=FlitType.CHIP_RESET)
+        self.transmitter.transmit_flit(WEST, data_type=FlitType.CHIP_RESET)
         print("[INFO] Please check the output on the Darwin3 development board.")
         return
     
-    @deprecated("此方法同reset()为旧版兼容API, 请使用 reset_freq(), 包含了reset和设置频率组合")
+    @deprecated("此方法同reset()为旧版兼容API, 请使用 hardware_reset(), 包含了reset和设置频率组合")
     def darwin3_init(self, freq=333):
         """
         按照指定频率配置 darwin3 芯片。
@@ -127,7 +124,7 @@ class darwin3_device(object):
         Returns:
             None
         """
-        transmit_flit(self.ip,port=self.port[0], data_type=FlitType.SET_FREQUENCY)
+        self.transmitter.transmit_flit(WEST, data_type=FlitType.SET_FREQUENCY)
         print("[INFO] Please check the output on the Darwin3 development board.")
         return
     

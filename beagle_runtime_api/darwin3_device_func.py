@@ -5,50 +5,13 @@ from functools import reduce
 
 from .compiler_model import CompilerModel
 
-from .tcp_transmitter import Transmitter
+from .transmitter.tcp_transmitter import TCPTransmitter
 
 from .darwin_flit.decode import decode
 from .darwin_flit.encode import encode
-from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,PKG_READ,WEST,EAST
+from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,PKG_READ
 from .darwin_flit.command_list import CommandList
-
-
-class FlitType():
-    CHIP_RESET = 10
-    SET_FREQUENCY = 11
-    NORMAL_FLIT = 0x8000
-    CLEAR_STATE = 0x8001
-    RESET_SPIKING_INPUT= 0x8002
-    
-def transmit_flit(ip, port, data_type, flit_bin:bytearray=b'', recv=False, recv_run_flit_file : Path=None) -> BytesIO:
-    """
-    发包到darwin3, recv=True时接收darwin3返回来的包
-    Args:
-        port (list(int)): TCP 连接端口列表
-        data_type (int): 发送包的格式
-        freq (int): 设置的时钟频率 (仅当 data_type==SET_FREQUENCY 时有效)
-        fbin (str): 发送的包内容 (仅当 data_type==NORMAL_FLIT 时有效)
-        recv (bool): 是否接受 Darwin3 的返回包
-        recv_run_flit_file (str): 保存返回包的名称
-        debug (bool): 调试标记
-    Returns:
-        None
-    """
-    trans = Transmitter()
-    trans.connect_lwip((ip, port))
-    match data_type:
-        case FlitType.CHIP_RESET:
-            trans.socket_inst.sendall(struct.pack('II', 0x0000,data_type))
-            print("[control] reset succeed")
-        case FlitType.SET_FREQUENCY:
-            trans.socket_inst.sendall(struct.pack('II', 333,data_type))
-            print("[control] set frequency succeed")
-        case _ :
-            trans.send_flit_bin(flit_bin, data_type)
-    if recv: fout=trans.recv(recv_run_flit_file)
-    else: fout=BytesIO()
-    trans.close()
-    return fout
+from .dma_direction import WEST,EAST,NORTH,SOUTH
 
 def gen_spike_input_dwnc(
     input_neuron_info: dict,
@@ -140,7 +103,7 @@ def excute_dwnc_command(device,dwnc_list,direction,type,saving_name='',recv=True
         bin_io_rslt=encode(dwnc_list,direction)
     # send
     # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
-    rslt = transmit_flit(device.ip,device.port[0] if direction==WEST else device.port[1], 
+    rslt = device.transmitter.transmit_flit(WEST, 
                         data_type=type,
                         flit_bin=bin_io_rslt,
                         recv=recv,
@@ -158,7 +121,7 @@ def excute_dwnc_command_prof(device,secretary,dwnc_list,direction,type,saving_na
     # send
     # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
     with secretary.flame_time('hardware running'):
-        rslt = transmit_flit(device.ip,device.port[0] if direction==WEST else device.port[1], 
+        rslt = device.transmitter.transmit_flit(WEST, 
                             data_type=type,
                             flit_bin=bin_io_rslt,
                             recv=recv,

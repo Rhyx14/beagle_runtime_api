@@ -1,6 +1,7 @@
 from pathlib import Path
 import json,re,os
-from .darwin_flit.constant import PKG_WRITE,WEST,EAST
+from .darwin_flit.constant import PKG_WRITE
+from .dma_direction import WEST,NORTH,SOUTH,EAST
 from .darwin_flit.command_list import CommandList
 class CompilerModel():
     def _load_write_ram(self,file,x,y,start_addr,entry):

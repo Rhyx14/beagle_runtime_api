@@ -1,4 +1,4 @@
-from .constant import WEST
+from ..dma_direction import WEST
 from .encode import encode
 class CommandList:
     global_list={}

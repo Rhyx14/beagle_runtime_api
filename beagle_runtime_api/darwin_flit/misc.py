@@ -1,4 +1,4 @@
-from .constant import WEST,EAST,NORTH,SOUTH
+from ..dma_direction import WEST,EAST,NORTH,SOUTH
 def decode_xy_single_board(hd):
     # 单芯片解码
     if hd.dst_y_sign==1: _dst_y= - hd.dst_y
