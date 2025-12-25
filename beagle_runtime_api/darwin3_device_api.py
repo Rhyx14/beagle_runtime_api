@@ -1,15 +1,9 @@
-import struct,os, json, logging, shutil
-import logging,os,json,glob,re,struct,time
-from io import StringIO,BytesIO
+import shutil, logging
 from pathlib import Path
 from functools import reduce
 
 from .compiler_model import CompilerModel
 
-from .tcp_transmitter import Transmitter
-
-from .darwin_flit.decode import decode
-from .darwin_flit.encode import encode
 from .darwin_flit.result import SpikeResult, MemResult
 from .darwin_flit.constant import PKG_WRITE,PKG_WRITE,PKG_SPIKE,PKG_CMD,PKG_READ,WEST,EAST
 from .darwin_flit.command_list import CommandList
@@ -19,6 +13,7 @@ try:
 except ImportError as e:
     print('PyTorch is not installed, ensure that no torch-API is used!')
 
+from .deprecated import deprecated
 from .darwin3_device_func import gen_spike_input_dwnc,transmit_flit,gen_deploy_flitin,excute_dwnc_command, excute_dwnc_command_prof
 
 class darwin3_device(object):
@@ -28,8 +23,7 @@ class darwin3_device(object):
 
     def __init__(
         self, 
-        protocol="TCP", 
-        ip=['172.31.111.35'], 
+        ip: str | tuple | list =['172.31.111.35'], 
         port=[6000, 6001], 
         step_size=100000, 
         app_path:Path | str="../", 
@@ -37,12 +31,8 @@ class darwin3_device(object):
         **kwds,
     ):
         """
-        
         Args:
-            protocol (str):   与 Darwin3 开发板通信使用的协议, 默认 TCP, 可选 LOCAL, 暂不支持其它
-            ip (list(str)):   Darwin3 板卡设备 ip 序列, 单芯片开发板最多支持两个 ip
-                              默认使用 ip[0] 进行上下位机通信 (暂不支持 ip[1] 的连接)
-                              (因为有两张网卡, 以太网接口和type-C接口均可使用)
+            ip :              Darwin3 板卡设备 ip, [list | tuple] 为兼容api格式，不起作用
             port (list(int)): 与 Darwin3 开发板通信使用的端口, 默认为 6000 和 6001
                               其中 port[0] 为和 Darwin3 west 端 DMA 进行通信的端口
                               port[0] 为和 Darwin3 east 端 DMA 进行通信的端口
@@ -76,14 +66,12 @@ class darwin3_device(object):
                     filemode='w')  # 'a'表示追加模式，'w'表示覆盖模式
         
         self.log_debug = log_debug
-        # protocol (str): 和 Darwin3 的连接方式
-        self.protocol = protocol
+
         # ip (str): 和 Darwin3 进行 TCP 连接的 IP 地址
         # port (list(int)): 和 Darwin3 进行 TCP 连接的端口号序列
-        if self.protocol == "LOCAL":
-            self.ip = "127.0.0.1"
-        else:
-            self.ip = ip[0]
+        if isinstance(ip,(list,tuple)):
+            ip=ip[0]
+        self.ip = ip
         self.port = port
 
         # step_size (int): 时间步长度
@@ -117,9 +105,9 @@ class darwin3_device(object):
         transmit_flit(self.ip,port=self.port[0], data_type=FlitType.SET_FREQUENCY)
         print("[INFO] Reset chip complete, please check the output on the Darwin3 development board.")
 
+    @deprecated("此方法同darwin3_init()为旧版兼容API, 请使用 reset_freq(), 包含了reset和设置频率组合")
     def reset(self,freq=333):
         """
-        [obsolete]
         复位硬件接口相关逻辑和硬件系统(darwin3 芯片, DMA 等)
         Args: 
             None
@@ -127,12 +115,12 @@ class darwin3_device(object):
             None
         """
         transmit_flit(self.ip,port=self.port[0], data_type=FlitType.CHIP_RESET)
-        print("Please check the output on the Darwin3 development board.")
+        print("[INFO] Please check the output on the Darwin3 development board.")
         return
     
+    @deprecated("此方法同reset()为旧版兼容API, 请使用 reset_freq(), 包含了reset和设置频率组合")
     def darwin3_init(self, freq=333):
         """
-        [obsolete]
         按照指定频率配置 darwin3 芯片。
         Args:
             freq (int): 兼容参数，无实际作用
@@ -140,18 +128,18 @@ class darwin3_device(object):
             None
         """
         transmit_flit(self.ip,port=self.port[0], data_type=FlitType.SET_FREQUENCY)
-        print("Please check the output on the Darwin3 development board.")
+        print("[INFO] Please check the output on the Darwin3 development board.")
         return
     
+    @deprecated("此方法为旧版兼容API, 请使用 run_darwin3_with_spikes")
     def run_darwin3_withoutfile(self,spike_neurons):
         '''
-        [obsolete]
         '''
         return self.run_darwin3_with_spikes(spike_neurons)
 
+    @deprecated("此方法为旧版兼容API, 请使用 run_darwin3_with_spikes")
     def run_darwin3_withfile(self,spike_neurons):
         '''
-        [obsolete]
         '''
         return self.run_darwin3_with_spikes(spike_neurons)
         
