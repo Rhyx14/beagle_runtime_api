@@ -103,7 +103,7 @@ def excute_dwnc_command(device,dwnc_list,direction,type,saving_name='',recv=True
         bin_io_rslt=encode(dwnc_list,direction)
     # send
     # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
-    rslt = device.transmitter.transmit_flit(WEST, 
+    rslt = device.transmitter.transmit_flit(direction, 
                         data_type=type,
                         flit_bin=bin_io_rslt,
                         recv=recv,
@@ -121,7 +121,7 @@ def excute_dwnc_command_prof(device,secretary,dwnc_list,direction,type,saving_na
     # send
     # Path.write_bytes(Path(self._cache_path/'beagle_run_flits_in.bin'),bin_io_rslt)
     with secretary.flame_time('hardware running'):
-        rslt = device.transmitter.transmit_flit(WEST, 
+        rslt = device.transmitter.transmit_flit(direction, 
                             data_type=type,
                             flit_bin=bin_io_rslt,
                             recv=recv,
