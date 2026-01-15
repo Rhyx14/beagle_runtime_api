@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "beagle_runtime_api"
+version = "0.2.3.260115"
+description = "Yet another runtime api for darwin3."
+readme = "README.md"  # 如果有 README 文件
+authors = [
+    {name = "Rhyx", email = "xu_hn@outlook.com"}
+]
+license = {text = "GPL"}  # 或使用 SPDX: "GPL-3.0-or-later"
+requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "numpy",
+    "loguru",
+]
+
+[tool.setuptools]
+packages = ["beagle_runtime_api"]
+
+# 可选：如果您有 data_files 需求
+[tool.setuptools.data-files]
+# 示例：如果要包含某些目录的文件
+# "share/beagle_runtime_api" = ["data/*", "config/*.json"]
