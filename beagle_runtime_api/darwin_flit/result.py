@@ -1,6 +1,13 @@
-from .constant import TYPE_READ_RESULT,TYPE_SPIKE_RESULT,TYPE_WRITE_RESULT
+from .constant import TYPE_READ_RESULT,TYPE_SPIKE_RESULT,TYPE_WRITE_RESULT,TYPE_CMD_RESULT
 from .misc import decode_xy_single_board
 from collections import defaultdict
+class CmdResult():
+    __slots__='type','cmd','arg'
+    def __init__(self,raw_pkg) -> None:
+        self.type=TYPE_CMD_RESULT
+        self.cmd=raw_pkg.cmd
+        self.arg=raw_pkg.arg
+
 class SpikeResult():
     __slots__='type','tik','x','y','dedr_id'
     def __init__(self,tik,raw_pkg) -> None:

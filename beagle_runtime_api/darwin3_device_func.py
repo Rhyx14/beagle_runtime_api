@@ -30,11 +30,11 @@ def gen_spike_input_dwnc(
     for _i in range(0, len(neuron_spike_list)):
         cur_spike_neuron_list = neuron_spike_list[_i]
         
-        if len(cur_spike_neuron_list)==0:
-            gap_spikes+=1
-        else:
-            dwnc_list.append((PKG_CMD,0b011000,gap_spikes)) # step timestep
-            gap_spikes=0
+        # if len(cur_spike_neuron_list)==0:
+        #     gap_spikes+=1
+        # else:
+        #     dwnc_list.append((PKG_CMD,0b011000,gap_spikes)) # step timestep
+        #     gap_spikes=0
         for spike_neuron in cur_spike_neuron_list:
             neuron_info = input_neuron_info[str(spike_neuron)]
             if len(neuron_info) > 0:
@@ -46,9 +46,9 @@ def gen_spike_input_dwnc(
                     neu_idx = 0x0
                 for target in targets_list:
                     dwnc_list.append((PKG_SPIKE,target[0],target[1],neu_idx,target[2]))
-        # dwnc_list.append((PKG_CMD,0b011000,0)) # step 1
-    if gap_spikes>0: # process tail empty spike list
-        dwnc_list.append((PKG_CMD,0b011000,gap_spikes-1))
+        dwnc_list.append((PKG_CMD,0b011000,0)) # step 1
+    # if gap_spikes>0: # process tail empty spike list
+    #     dwnc_list.append((PKG_CMD,0b011000,gap_spikes-1))
     dwnc_list.append((PKG_CMD,0,0)) # turn off
     return dwnc_list
 

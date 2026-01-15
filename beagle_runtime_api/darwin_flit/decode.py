@@ -2,7 +2,7 @@ from .flit import Head
 from .nc_pkgb import SpikePkg,WritePkg,CmdPkg,ReadPkg
 from .constant import PKG_FFLOW,PKG_FLOW,PKG_READ,PKG_REWARD,PKG_SHORT_REWARD,PKG_SHORT_SPIKE,PKG_SPIKE,PKG_WRITE
 from .constant import FLIT_TYPE_BODY,FLIT_TYPE_HEAD,FLIT_TYPE_CMD,FLIT_TYPE_TAIL
-from .result import SpikeResult,MemResult
+from .result import SpikeResult,MemResult,CmdResult
 from io import BytesIO
 def decode(flits_buffer) -> list:
     """
@@ -25,6 +25,7 @@ def decode(flits_buffer) -> list:
             if hd.cmd== 0b011000:
                 max_tik_index += hd.arg + 1 
             read_index+=4
+            rw_rslt.append(CmdResult(hd))
         else:
             _pkg_class=hd.pkg_class
             if _pkg_class == PKG_WRITE:
